@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <numeric>
 #include <optional>
+#include <iostream>
 #include <stdexcept>
 
 #include "utils/bytestream.hh"
@@ -20,7 +21,6 @@ using TruncatedPacketNumber = std::pair<uint32_t, uint8_t>;
 inline TruncatedPacketNumber encodePacketNumber(uint64_t packetNumber,
                                                 uint64_t largestAcked) {
     constexpr auto DIGITS = std::numeric_limits<decltype(packetNumber)>::digits;
-
     uint64_t numberOfUnACKed =
         largestAcked != std::numeric_limits<decltype(largestAcked)>::max()
             ? packetNumber - largestAcked

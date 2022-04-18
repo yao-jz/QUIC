@@ -1,3 +1,4 @@
+#include <iostream>
 #include "quic.hh"
 
 namespace thquic::context {
@@ -27,11 +28,13 @@ int QUIC::SetConnectionCloseCallback(
 }
 
 int QUIC::SocketLoop() {
+    std::cout << "enter socket loop " << std::endl;
     for (;;) {
         auto datagram = this->socket.tryRecvMsg(10ms);
         if (datagram) {
             this->incomingMsg(std::move(datagram));
         }
+
 
         for (auto& connection : this->connections) {
             auto& pendingPackets = connection.second->GetPendingPackets();
@@ -85,6 +88,8 @@ std::shared_ptr<utils::UDPDatagram> QUIC::encodeDatagram(
 
 int QUIC::incomingMsg(
     [[maybe_unused]] std::unique_ptr<utils::UDPDatagram> datagram) {
+    std::cout << "ADSfadsfasd" << std::endl;
+    
     return 0;
 }
 
@@ -101,6 +106,18 @@ QUICClient::QUICClient() : QUIC(PeerType::CLIENT) {}
 uint64_t QUICClient::CreateConnection(
     [[maybe_unused]] sockaddr_in& addrTo,
     [[maybe_unused]] const ConnectionReadyCallbackType& callback) {
+    
+    // 设置client的ip地址
+    // struct sockaddr_in addrFrom {
+    //     AF_INET, 25565, {inet_addr("127.0.0.1")}, {0}
+    // };
+    std::shared_ptr<payload::Initial> initial_header = std::make_shared<payload::Initial>(config::QUIC_VERSION, ConnectionID(), ConnectionID(), 200, 200);
+    std::shared_ptr<payload::Payload> initial_payload = std::make_shared<payload::Payload>();
+    std::shared_ptr<payload::Packet> initial_packet = std::make_shared<payload::Packet>(initial_header, initial_payload, addrTo);
+    std::shared_ptr<utils::UDPDatagram> initial_dg = QUIC::encodeDatagram(initial_packet);
+
+    this->socket.sendMsg(initial_dg);
+   
     return 0;
 }
 

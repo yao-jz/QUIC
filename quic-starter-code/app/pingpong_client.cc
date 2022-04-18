@@ -1,6 +1,7 @@
 #include "context/common.hh"
 #include "context/quic.hh"
 #include "utils/log.hh"
+#include <iostream>
 using namespace std::chrono_literals;
 
 class PingPongClient {
