@@ -83,8 +83,37 @@ std::shared_ptr<utils::UDPDatagram> QUIC::encodeDatagram(
                                                 pkt->GetAddrDst(), 0);
 }
 
+/**
+ * @brief 处理接收到的包
+ * @param datagram 介绍到的报文
+ * @return 返回包的处理结果
+ * @author weiyz19
+ */
 int QUIC::incomingMsg(
     [[maybe_unused]] std::unique_ptr<utils::UDPDatagram> datagram) {
+    //==================== start =======================//
+    uint8_t* buffer = datagram->FetchBuffer().get();
+    utils::ByteStream stream = utils::ByteStream(buffer, datagram->BufferLen());
+    std::shared_ptr<payload::Header> header = payload::Header::Parse(stream);
+    payload::PacketType packetType = header->Type();
+    switch (packetType) {
+        case payload::PacketType::INITIAL:
+            utils::logger::warn("PacketType::INITIAL\n");
+            break;
+        case payload::PacketType::ZERO_RTT:
+            utils::logger::warn("PacketType::ZERO_RTT\n");
+            break;
+        case payload::PacketType::HANDSHAKE:
+            utils::logger::warn("PacketType::HANDSHAKE\n");
+            break;
+        case payload::PacketType::ONE_RTT:
+            utils::logger::warn("PacketType::ONE_RTT\n");
+            break;
+        case payload::PacketType::RETRY:
+            utils::logger::warn("PacketType::RETRY\n");
+            break;
+    }
+    //==================== start =======================//
     return 0;
 }
 
