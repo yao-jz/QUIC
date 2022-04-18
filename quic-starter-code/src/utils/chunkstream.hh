@@ -29,7 +29,7 @@ class Chunk : public ByteStream {
     uint64_t MinimumOffset() const { return this->offset + this->Pos(); }
 
    private:
-    const uint64_t offset{0};
+    const uint64_t offset{0}; // 单位是字节
 };
 
 class ChunkStream {
