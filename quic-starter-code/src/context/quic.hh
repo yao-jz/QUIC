@@ -69,6 +69,8 @@ class QUICServer : public QUIC {
 
     int SetConnectionReadyCallback(ConnectionReadyCallbackType callback);
 
+    std::map<uint64_t, StreamReadyCallbackType> streamReadyCallbacks;
+
 
    protected:
     int incomingMsg(std::unique_ptr<utils::UDPDatagram> datagram);

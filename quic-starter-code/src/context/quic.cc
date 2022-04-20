@@ -72,6 +72,9 @@ uint64_t QUIC::SendData([[maybe_unused]] uint64_t sequence,
 int QUIC::SetStreamReadyCallback(
     [[maybe_unused]] uint64_t sequence,
     [[maybe_unused]] StreamReadyCallbackType callback) {
+    
+    QUICServer* server = static_cast<QUICServer*>(this);
+    server->streamReadyCallbacks[sequence] = callback;
     return 0;
 }
 
