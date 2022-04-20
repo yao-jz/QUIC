@@ -17,9 +17,19 @@ class Connection {
         pendingPackets.push_back(packet);
         return 0;
     }
+    void setAddrTo(struct sockaddr_in addr)
+    {
+        this->addrTo = addr;
+    }
+
+    struct sockaddr_in getAddrTo()
+    {
+        return this->addrTo;
+    }
 
    private:
     std::list<std::shared_ptr<payload::Packet>> pendingPackets;
+    struct sockaddr_in addrTo;
 };
 
 }  // namespace thquic::context

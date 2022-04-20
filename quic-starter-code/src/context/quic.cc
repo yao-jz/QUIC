@@ -80,6 +80,9 @@ uint64_t QUIC::SendData([[maybe_unused]] uint64_t sequence,
 int QUIC::SetStreamReadyCallback(
     [[maybe_unused]] uint64_t sequence,
     [[maybe_unused]] StreamReadyCallbackType callback) {
+    
+    QUICServer* server = static_cast<QUICServer*>(this);
+    server->streamReadyCallbacks[sequence] = callback;
     return 0;
 }
 
@@ -111,6 +114,7 @@ int QUICClient::incomingMsg(
         {
             utils::logger::warn("SERVER PacketType::INITIAL\n");
             std::shared_ptr<Connection> connection = std::make_shared<Connection>();
+            connection->setAddrTo(datagram->GetAddrSrc());
             uint64_t sequence = this->connectionSequence++;
             this->connections[sequence] = connection;
             this->connectionReadyCallback(sequence);
@@ -147,7 +151,11 @@ int QUICServer::incomingMsg(
             std::shared_ptr<payload::Packet> initial_packet = std::make_shared<payload::Packet>(initial_header, initial_payload, datagram->GetAddrSrc());
             std::shared_ptr<utils::UDPDatagram> initial_dg = QUIC::encodeDatagram(initial_packet);
             this->socket.sendMsg(initial_dg);
-            this->connectionReadyCallback(this->connectionSequence++);
+            std::shared_ptr<Connection> connection = std::make_shared<Connection>();
+            connection->setAddrTo(datagram->GetAddrSrc());
+            uint64_t sequence = this->connectionSequence++;
+            this->connections[sequence] = connection;
+            this->connectionReadyCallback(sequence);
             break;
         }
         case payload::PacketType::ZERO_RTT:
