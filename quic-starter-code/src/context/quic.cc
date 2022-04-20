@@ -147,9 +147,30 @@ int QUICClient::incomingMsg(
         case payload::PacketType::HANDSHAKE:
             utils::logger::warn("SERVER PacketType::HANDSHAKE\n");
             break;
-        case payload::PacketType::ONE_RTT:
+        case payload::PacketType::ONE_RTT: {
             utils::logger::warn("SERVER PacketType::ONE_RTT\n");
+            std::list<std::shared_ptr<payload::Frame>> frames = payload::Payload(stream, bufferLen - stream.Pos()).GetFrames();
+            for (auto frame : frames) {
+                switch (frame->Type()) {
+                    case payload::FrameType::STREAM: {
+                        utils::logger::warn("SERVER Frame Type::STREAM\n");
+                        std::shared_ptr<payload::StreamFrame> streamFrame = std::static_pointer_cast<payload::StreamFrame>(frame);
+                        uint64_t sequence = this->ID2Sequence[header->GetDstID()];
+                        uint64_t streamID = streamFrame->StreamID();
+                        // if (this->stream_count[sequence] <= streamID)
+                        //     this->streamReadyCallback(sequence, streamID);
+                        this->streamDataReadyCallback(sequence, streamID, streamFrame->FetchBuffer(), streamFrame->GetLength(), streamFrame->FINFlag());
+                        break;
+                    }
+                    case payload::FrameType::CONNECTION_CLOSE: {
+                        utils::logger::warn("SERVER Frame Type::CONNECTION_CLOSE\n");
+                        uint64_t sequence = this->ID2Sequence[header->GetDstID()];
+                        this->ConnectionCloseCallback(sequence, "", 0);
+                    }
+                }
+            }
             break;
+        }
         case payload::PacketType::RETRY:
             utils::logger::warn("SERVER PacketType::RETRY\n");
             break;
@@ -193,8 +214,7 @@ int QUICServer::incomingMsg(
                     case payload::FrameType::STREAM: {
                         utils::logger::warn("CLIENT Frame Type::STREAM\n");
                         std::shared_ptr<payload::StreamFrame> streamFrame = std::static_pointer_cast<payload::StreamFrame>(frame);
-                        ConnectionID connID = header->GetDstID();
-                        uint64_t sequence = this->ID2Sequence[connID];
+                        uint64_t sequence = this->ID2Sequence[header->GetDstID()];
                         uint64_t streamID = streamFrame->StreamID();
                         if (this->stream_count[sequence] <= streamID)
                             this->streamReadyCallback(sequence, streamID);
@@ -203,6 +223,8 @@ int QUICServer::incomingMsg(
                     }
                     case payload::FrameType::CONNECTION_CLOSE: {
                         utils::logger::warn("CLIENT Frame Type::CONNECTION_CLOSE\n");
+                        uint64_t sequence = this->ID2Sequence[header->GetDstID()];
+                        this->ConnectionCloseCallback(sequence, "", 0);
                     }
                 }
             }
