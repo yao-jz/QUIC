@@ -172,6 +172,7 @@ int QUICServer::incomingMsg(
                         // default number:
                         uint64_t sequence = 0;
                         uint64_t stream_id = s_frame->StreamID();
+                        this->streamReadyCallback(stream_id);
                         break;
                     }
                 }
