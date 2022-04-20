@@ -60,6 +60,7 @@ class QUIC {
     utils::UDPSocket socket;
     std::map<uint64_t, std::shared_ptr<Connection>> connections;
     uint64_t connectionSequence;
+    uint64_t stream_count[10000];
 };
 
 class QUICServer : public QUIC {

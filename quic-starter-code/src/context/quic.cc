@@ -50,7 +50,10 @@ int QUIC::SocketLoop() {
 
 uint64_t QUIC::CreateStream([[maybe_unused]] uint64_t sequence,
                             [[maybe_unused]] bool bidirectional) {
-    return 0;
+    if(!bidirectional)
+        return 2|((this->stream_count[sequence]++)<<2)|(3<<62);
+    else
+        return (this->stream_count[sequence]++)<<2|(3<<62);
 }
 
 uint64_t QUIC::CloseStream([[maybe_unused]] uint64_t sequence,
