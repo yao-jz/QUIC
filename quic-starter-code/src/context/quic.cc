@@ -163,7 +163,7 @@ int QUICServer::incomingMsg(
         }
         case payload::PacketType::ONE_RTT: {
             utils::logger::warn("CLIENT PacketType::ZERO_RTT\n");
-            std::list<std::shared_ptr<payload::Frame>> frames = payload::Payload(stream, bufferLen).GetFrames();
+            std::list<std::shared_ptr<payload::Frame>> frames = payload::Payload(stream, bufferLen - stream.Pos()).GetFrames();
             for (auto frame : frames) {
                 switch (frame->Type()) {
                     case payload::FrameType::STREAM: {
