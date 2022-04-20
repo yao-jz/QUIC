@@ -66,14 +66,15 @@ uint64_t QUIC::SendData([[maybe_unused]] uint64_t sequence,
                         [[maybe_unused]] std::unique_ptr<uint8_t[]> buf,
                         [[maybe_unused]] size_t len,
                         [[maybe_unused]] bool FIN) {
-
-    std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(sequence, 0, 0);
-    std::shared_ptr<payload::StreamFrame> stream_frame = std::make_shared<payload::StreamFrame>(streamID, buf, len, 0, len, FIN);
+    // thquic::ConnectionID connection_id = this->connections[sequence]
+    std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(ConnectionID(), 0, 0);
+    std::shared_ptr<payload::StreamFrame> stream_frame = std::make_shared<payload::StreamFrame>(streamID, std::move(buf), len, 0, len, FIN);
     std::shared_ptr<payload::Payload> stream_payload = std::make_shared<payload::Payload>();
     stream_payload->AttachFrame(stream_frame);
-    // std::shared_ptr<payload::Packet> stream_packet = std::make_shared<payload::Packet>(header, stream_payload, addrTo);
-    // std::shared_ptr<utils::UDPDatagram> stream_dg = QUIC::encodeDatagram(stream_packet);
-    // this->socket.sendMsg(stream_dg);
+    sockaddr_in addrTo = this->connections[sequence]->getAddrTo();
+    std::shared_ptr<payload::Packet> stream_packet = std::make_shared<payload::Packet>(header, stream_payload, addrTo);
+    std::shared_ptr<utils::UDPDatagram> stream_dg = QUIC::encodeDatagram(stream_packet);
+    this->socket.sendMsg(stream_dg);
     return 0;
 }
 
