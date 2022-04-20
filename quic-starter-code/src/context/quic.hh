@@ -79,7 +79,6 @@ class QUICServer : public QUIC {
    protected:
     int incomingMsg(std::unique_ptr<utils::UDPDatagram> datagram);
 
-
    private:
     ConnectionReadyCallbackType connectionReadyCallback;
 };
