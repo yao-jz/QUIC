@@ -95,7 +95,13 @@ std::shared_ptr<utils::UDPDatagram> QUIC::encodeDatagram(
 int QUIC::incomingMsg(
     [[maybe_unused]] std::unique_ptr<utils::UDPDatagram> datagram) {
     //==================== start =======================//
+<<<<<<< HEAD
     utils::ByteStream stream = utils::ByteStream(datagram->FetchBuffer(), datagram->BufferLen());
+=======
+    size_t bufferLen = datagram->BufferLen();
+    utils::ByteStream stream = utils::ByteStream(datagram->FetchBuffer(), bufferLen);
+    utils::logger::warn("building header...\n");
+>>>>>>> bc82651ab6fafbda7972ead69147bad2a88d0223
     std::shared_ptr<payload::Header> header = payload::Header::Parse(stream);
     payload::PacketType packetType = header->Type();
     // TODO: 解析负载？需要嘛？
