@@ -51,9 +51,9 @@ int QUIC::SocketLoop() {
 uint64_t QUIC::CreateStream([[maybe_unused]] uint64_t sequence,
                             [[maybe_unused]] bool bidirectional) {
     if(!bidirectional)
-        return uint64_t(2)|((this->stream_count[sequence]++)<<2)|(uint64_t(3)<<62);
+        return uint64_t(2)|((this->stream_count[sequence]++)<<2);
     else
-        return (this->stream_count[sequence]++)<<2|(uint64_t(3)<<62);
+        return (this->stream_count[sequence]++)<<2;
 }
 
 uint64_t QUIC::CloseStream([[maybe_unused]] uint64_t sequence,
@@ -66,6 +66,7 @@ uint64_t QUIC::SendData([[maybe_unused]] uint64_t sequence,
                         [[maybe_unused]] std::unique_ptr<uint8_t[]> buf,
                         [[maybe_unused]] size_t len,
                         [[maybe_unused]] bool FIN) {
+    std::cout << "sendData, streamID is " << streamID << std::endl;
     // thquic::ConnectionID connection_id = this->connections[sequence]
     std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(ConnectionID(), 0, 0);
     std::shared_ptr<payload::StreamFrame> stream_frame = std::make_shared<payload::StreamFrame>(streamID, std::move(buf), len, 0, len, FIN);
