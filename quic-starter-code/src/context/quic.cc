@@ -51,9 +51,9 @@ int QUIC::SocketLoop() {
 uint64_t QUIC::CreateStream([[maybe_unused]] uint64_t sequence,
                             [[maybe_unused]] bool bidirectional) {
     if(!bidirectional)
-        return 2|((this->stream_count[sequence]++)<<2)|(3<<62);
+        return uint64_t(2)|((this->stream_count[sequence]++)<<2)|(uint64_t(3)<<62);
     else
-        return (this->stream_count[sequence]++)<<2|(3<<62);
+        return (this->stream_count[sequence]++)<<2|(uint64_t(3)<<62);
 }
 
 uint64_t QUIC::CloseStream([[maybe_unused]] uint64_t sequence,
@@ -66,6 +66,14 @@ uint64_t QUIC::SendData([[maybe_unused]] uint64_t sequence,
                         [[maybe_unused]] std::unique_ptr<uint8_t[]> buf,
                         [[maybe_unused]] size_t len,
                         [[maybe_unused]] bool FIN) {
+
+    std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(sequence, 0, 0);
+    std::shared_ptr<payload::StreamFrame> stream_frame = std::make_shared<payload::StreamFrame>(streamID, buf, len, 0, len, FIN);
+    std::shared_ptr<payload::Payload> stream_payload = std::make_shared<payload::Payload>();
+    stream_payload->AttachFrame(stream_frame);
+    // std::shared_ptr<payload::Packet> stream_packet = std::make_shared<payload::Packet>(header, stream_payload, addrTo);
+    // std::shared_ptr<utils::UDPDatagram> stream_dg = QUIC::encodeDatagram(stream_packet);
+    // this->socket.sendMsg(stream_dg);
     return 0;
 }
 
@@ -179,6 +187,7 @@ uint64_t QUICClient::CreateConnection(
     // struct sockaddr_in addrFrom {
     //     AF_INET, this->socket.GetLocalPort(), {inet_addr("127.0.0.1")}, {0}
     // };
+    this->addrTo = addrTo;
     std::shared_ptr<payload::Initial> initial_header = std::make_shared<payload::Initial>(config::QUIC_VERSION, ConnectionID(), ConnectionID(), 200, 200);
     std::shared_ptr<payload::Payload> initial_payload = std::make_shared<payload::Payload>();
     std::shared_ptr<payload::Packet> initial_packet = std::make_shared<payload::Packet>(initial_header, initial_payload, addrTo);

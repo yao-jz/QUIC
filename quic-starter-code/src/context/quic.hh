@@ -91,6 +91,7 @@ class QUICClient : public QUIC {
 
    private:
     ConnectionReadyCallbackType connectionReadyCallback;
+    sockaddr_in addrTo;
 };
 
 }  // namespace thquic::context
