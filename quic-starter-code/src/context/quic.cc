@@ -18,6 +18,14 @@ QUIC::QUIC(PeerType type, uint16_t port, std::string address)
 int QUIC::CloseConnection([[maybe_unused]] uint64_t sequence,
                           [[maybe_unused]] const std::string& reason,
                           [[maybe_unused]] uint64_t errorCode) {
+    utils::logger::info("CloseConnection\n");
+    auto this_connection = this->connections[sequence];
+    std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(ConnectionID(), 0, 0);
+    std::shared_ptr<payload::ConnectionCloseAppFrame> close_frame = std::make_shared<payload::ConnectionCloseAppFrame>(errorCode,reason);
+    std::shared_ptr<payload::Payload> close_payload = std::make_shared<payload::Payload>();
+    sockaddr_in addrTo = this_connection->getAddrTo();
+    std::shared_ptr<payload::Packet> close_packet = std::make_shared<payload::Packet>(header, close_payload, addrTo);
+    this_connection->insertIntoPending(close_packet);
     return 0;
 }
 
@@ -58,6 +66,16 @@ uint64_t QUIC::CreateStream([[maybe_unused]] uint64_t sequence,
 
 uint64_t QUIC::CloseStream([[maybe_unused]] uint64_t sequence,
                            [[maybe_unused]] uint64_t streamID) {
+    // TODO: 如果有没有发完的包，如果有的话，在这里需要全部发送
+    utils::logger::info("CloseStream\n");
+    auto this_connection = this->connections[sequence];
+    std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(ConnectionID(), 0, 0);
+    std::shared_ptr<payload::StreamFrame> stream_frame = std::make_shared<payload::StreamFrame>(streamID, nullptr, 0, 0, 0, true);
+    std::shared_ptr<payload::Payload> stream_payload = std::make_shared<payload::Payload>();
+    stream_payload->AttachFrame(stream_frame);
+    sockaddr_in addrTo = this_connection->getAddrTo();
+    std::shared_ptr<payload::Packet> stream_packet = std::make_shared<payload::Packet>(header, stream_payload, addrTo);
+    this_connection->insertIntoPending(stream_packet);
     return 0;
 }
 
@@ -66,15 +84,16 @@ uint64_t QUIC::SendData([[maybe_unused]] uint64_t sequence,
                         [[maybe_unused]] std::unique_ptr<uint8_t[]> buf,
                         [[maybe_unused]] size_t len,
                         [[maybe_unused]] bool FIN) {
-    std::cout << "sendData, streamID is " << streamID << std::endl;
+    utils::logger::info("sendData, streamID is {}\n", streamID);
+    auto this_connection = this->connections[sequence];
+    // thquic::ConnectionID connection_id = this->connections[sequence]
     std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(this->SrcID2DstID[this->Sequence2ID[sequence]], 0, 0);
     std::shared_ptr<payload::StreamFrame> stream_frame = std::make_shared<payload::StreamFrame>(streamID, std::move(buf), len, 0, len, FIN);
     std::shared_ptr<payload::Payload> stream_payload = std::make_shared<payload::Payload>();
     stream_payload->AttachFrame(stream_frame);
     sockaddr_in addrTo = this->connections[sequence]->getAddrTo();
     std::shared_ptr<payload::Packet> stream_packet = std::make_shared<payload::Packet>(header, stream_payload, addrTo);
-    std::shared_ptr<utils::UDPDatagram> stream_dg = QUIC::encodeDatagram(stream_packet);
-    this->socket.sendMsg(stream_dg);
+    this_connection->insertIntoPending(stream_packet);
     return 0;
 }
 
@@ -168,7 +187,7 @@ int QUICServer::incomingMsg(
         }
         case payload::PacketType::ONE_RTT: {
             utils::logger::warn("CLIENT PacketType::ONE_RTT\n");
-            std::list<std::shared_ptr<payload::Frame>> frames = payload::Payload(stream, bufferLen).GetFrames();
+            std::list<std::shared_ptr<payload::Frame>> frames = payload::Payload(stream, bufferLen - stream.Pos()).GetFrames();
             for (auto frame : frames) {
                 switch (frame->Type()) {
                     case payload::FrameType::STREAM: {
@@ -180,6 +199,9 @@ int QUICServer::incomingMsg(
                         this->streamReadyCallback(stream_id);
                         break;
                     }
+                    case payload::FrameType::CONNECTION_CLOSE: {
+                        utils::logger::warn("CLIENT Frame Type::CONNECTION_CLOSE\n");
+                    }
                 }
             }
             break;
@@ -188,7 +210,7 @@ int QUICServer::incomingMsg(
             utils::logger::warn("SERVER PacketType::HANDSHAKE\n");
             break;
         case payload::PacketType::ZERO_RTT:
-            utils::logger::warn("SERVER PacketType::ONE_RTT\n");
+            utils::logger::warn("SERVER PacketType::ZERO_RTT\n");
             break;
         case payload::PacketType::RETRY:
             utils::logger::warn("SERVER PacketType::RETRY\n");
