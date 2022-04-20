@@ -2,14 +2,14 @@
 #include "quic.hh"
 
 namespace thquic::context {
-thquic::context::QUIC::QUIC(thquic::context::PeerType type) : type(type) {
+thquic::context::QUIC::QUIC(thquic::context::PeerType type) : type(type), connectionSequence(0) {
     if (type != PeerType::CLIENT) {
         throw std::invalid_argument("illegal client context config");
     }
 }
 
 QUIC::QUIC(PeerType type, uint16_t port, std::string address)
-    : type(type), socket(port, address) {
+    : type(type), socket(port, address), connectionSequence(0) {
     if (type != PeerType::SERVER || port == 0) {
         throw std::invalid_argument("illegal server context config.");
     }
@@ -95,13 +95,9 @@ std::shared_ptr<utils::UDPDatagram> QUIC::encodeDatagram(
 int QUIC::incomingMsg(
     [[maybe_unused]] std::unique_ptr<utils::UDPDatagram> datagram) {
     //==================== start =======================//
-<<<<<<< HEAD
-    utils::ByteStream stream = utils::ByteStream(datagram->FetchBuffer(), datagram->BufferLen());
-=======
     size_t bufferLen = datagram->BufferLen();
     utils::ByteStream stream = utils::ByteStream(datagram->FetchBuffer(), bufferLen);
     utils::logger::warn("building header...\n");
->>>>>>> bc82651ab6fafbda7972ead69147bad2a88d0223
     std::shared_ptr<payload::Header> header = payload::Header::Parse(stream);
     payload::PacketType packetType = header->Type();
     // TODO: 解析负载？需要嘛？
@@ -158,6 +154,8 @@ QUICServer::QUICServer(uint16_t port, std::string address)
 
 int QUICServer::SetConnectionReadyCallback([
     [maybe_unused]] ConnectionReadyCallbackType callback) {
+    // for server, set connection readycallback
+    this->connectionReadyCallback = callback;
     return 0;
 }
 
@@ -177,6 +175,14 @@ uint64_t QUICClient::CreateConnection(
     std::shared_ptr<utils::UDPDatagram> initial_dg = QUIC::encodeDatagram(initial_packet);
 
     this->socket.sendMsg(initial_dg);
+
+    std::shared_ptr<Connection> connection = std::make_shared<Connection>();
+    uint64_t sequence = this->connectionSequence++;
+    this->connections[sequence] = connection;
+
+    this->connectionReadyCallback = callback;
+
+
    
     return 0;
 }

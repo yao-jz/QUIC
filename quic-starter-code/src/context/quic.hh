@@ -59,6 +59,7 @@ class QUIC {
     const PeerType type;
     utils::UDPSocket socket;
     std::map<uint64_t, std::shared_ptr<Connection>> connections;
+    uint64_t connectionSequence;
 };
 
 class QUICServer : public QUIC {
@@ -77,6 +78,8 @@ class QUICClient : public QUIC {
 
     uint64_t CreateConnection(struct sockaddr_in& addrTo,
                               const ConnectionReadyCallbackType& callback);
+   private:
+    ConnectionReadyCallbackType connectionReadyCallback;
 };
 
 }  // namespace thquic::context
