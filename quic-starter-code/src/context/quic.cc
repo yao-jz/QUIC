@@ -105,9 +105,15 @@ int QUIC::incomingMsg(
         case PeerType::SERVER:
         {
             switch (packetType) {
-                case payload::PacketType::INITIAL:
-                    utils::logger::warn("SERVER PacketType::INITIAL\n");
+                case payload::PacketType::INITIAL: {
+                    utils::logger::warn("SERVER PacketType::INITIAL, sending INITIAL Packet back.\n");
+                    std::shared_ptr<payload::Initial> initial_header = std::make_shared<payload::Initial>(config::QUIC_VERSION, ConnectionID(), ConnectionID(), 200, 200);
+                    std::shared_ptr<payload::Payload> initial_payload = std::make_shared<payload::Payload>();
+                    std::shared_ptr<payload::Packet> initial_packet = std::make_shared<payload::Packet>(initial_header, initial_payload, datagram->GetAddrSrc());
+                    std::shared_ptr<utils::UDPDatagram> initial_dg = QUIC::encodeDatagram(initial_packet);
+                    this->socket.sendMsg(initial_dg);
                     break;
+                }
                 case payload::PacketType::ZERO_RTT:
                     utils::logger::warn("SERVER PacketType::ZERO_RTT\n");
                     break;
@@ -127,19 +133,19 @@ int QUIC::incomingMsg(
         {
             switch (packetType) {
                 case payload::PacketType::INITIAL:
-                    utils::logger::warn("CLIENT PacketType::INITIAL\n");
+                    utils::logger::warn("SERVER PacketType::INITIAL\n");
                     break;
                 case payload::PacketType::ZERO_RTT:
-                    utils::logger::warn("CLIENT PacketType::ZERO_RTT\n");
+                    utils::logger::warn("SERVER PacketType::ZERO_RTT\n");
                     break;
                 case payload::PacketType::HANDSHAKE:
-                    utils::logger::warn("CLIENT PacketType::HANDSHAKE\n");
+                    utils::logger::warn("SERVER PacketType::HANDSHAKE\n");
                     break;
                 case payload::PacketType::ONE_RTT:
-                    utils::logger::warn("CLIENT PacketType::ONE_RTT\n");
+                    utils::logger::warn("SERVER PacketType::ONE_RTT\n");
                     break;
                 case payload::PacketType::RETRY:
-                    utils::logger::warn("CLIENT PacketType::RETRY\n");
+                    utils::logger::warn("SERVER PacketType::RETRY\n");
                     break;
             }
             break;
@@ -171,7 +177,6 @@ uint64_t QUICClient::CreateConnection(
     std::shared_ptr<payload::Payload> initial_payload = std::make_shared<payload::Payload>();
     std::shared_ptr<payload::Packet> initial_packet = std::make_shared<payload::Packet>(initial_header, initial_payload, addrTo);
     std::shared_ptr<utils::UDPDatagram> initial_dg = QUIC::encodeDatagram(initial_packet);
-
     this->socket.sendMsg(initial_dg);
    
     return 0;
