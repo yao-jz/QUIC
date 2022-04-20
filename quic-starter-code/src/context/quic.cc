@@ -162,7 +162,7 @@ int QUICServer::incomingMsg(
             break;
         }
         case payload::PacketType::ONE_RTT: {
-            utils::logger::warn("CLIENT PacketType::ZERO_RTT\n");
+            utils::logger::warn("CLIENT PacketType::ONE_RTT\n");
             std::list<std::shared_ptr<payload::Frame>> frames = payload::Payload(stream, bufferLen - stream.Pos()).GetFrames();
             for (auto frame : frames) {
                 switch (frame->Type()) {
@@ -182,7 +182,7 @@ int QUICServer::incomingMsg(
             utils::logger::warn("SERVER PacketType::HANDSHAKE\n");
             break;
         case payload::PacketType::ZERO_RTT:
-            utils::logger::warn("SERVER PacketType::ONE_RTT\n");
+            utils::logger::warn("SERVER PacketType::ZERO_RTT\n");
             break;
         case payload::PacketType::RETRY:
             utils::logger::warn("SERVER PacketType::RETRY\n");
