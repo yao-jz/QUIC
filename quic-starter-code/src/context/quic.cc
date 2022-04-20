@@ -146,7 +146,7 @@ int QUICServer::incomingMsg(
     payload::PacketType packetType = header->Type();
     switch (packetType) {
         case payload::PacketType::INITIAL: {
-            utils::logger::warn("SERVER PacketType::INITIAL, sending INITIAL Packet back.\n");
+            utils::logger::warn("CLIENT PacketType::INITIAL\n");
             std::shared_ptr<payload::Initial> initial_header = std::make_shared<payload::Initial>(config::QUIC_VERSION, ConnectionID(), ConnectionID(), 200, 200);
             std::shared_ptr<payload::Payload> initial_payload = std::make_shared<payload::Payload>();
             std::shared_ptr<payload::Packet> initial_packet = std::make_shared<payload::Packet>(initial_header, initial_payload, datagram->GetAddrSrc());
@@ -156,11 +156,31 @@ int QUICServer::incomingMsg(
             connection->setAddrTo(datagram->GetAddrSrc());
             uint64_t sequence = this->connectionSequence++;
             this->connections[sequence] = connection;
+            utils::logger::warn("CLIENT INITIAL PACKET BACK\n");
             this->connectionReadyCallback(sequence);
             break;
         }
         case payload::PacketType::ZERO_RTT:
-            utils::logger::warn("SERVER PacketType::ZERO_RTT\n");
+            utils::logger::warn("CLIENT PacketType::ZERO_RTT\n");
+            std::list<std::shared_ptr<payload::Frame>> frames = payload::Payload(stream, bufferLen).GetFrames();
+            for (auto frame : frames) {
+                switch (frame->Type()) {
+                    case payload::FrameType::STREAM: {
+                        utils::logger::warn("CLIENT Frame Type::STREAM\n");
+                        std::shared_ptr<payload::StreamFrame> s_frame = std::static_pointer_cast<payload::StreamFrame>(frame);
+                        // default number:
+                        ConnectionID sequence = 0;
+                        uint64_t stream_id = s_frame->StreamID();
+                        break;
+        }
+                if (frame->Type())
+                {
+                    /* code */
+                }
+                
+            }
+            
+            case(payload->)
             break;
         case payload::PacketType::HANDSHAKE:
             utils::logger::warn("SERVER PacketType::HANDSHAKE\n");
@@ -174,8 +194,6 @@ int QUICServer::incomingMsg(
     }
     return 0;
 }
-
-
 
 QUICServer::QUICServer(uint16_t port, std::string address)
     : QUIC(PeerType::SERVER, port, address) {}
