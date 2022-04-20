@@ -83,7 +83,7 @@ int QUIC::SetStreamReadyCallback(
     [[maybe_unused]] StreamReadyCallbackType callback) {
     
     QUICServer* server = static_cast<QUICServer*>(this);
-    server->streamReadyCallbacks[sequence] = callback;
+    server->streamReadyCallback = std::bind(callback, sequence, std::placeholders::_1);
     return 0;
 }
 
