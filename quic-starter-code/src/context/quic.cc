@@ -18,12 +18,21 @@ QUIC::QUIC(PeerType type, uint16_t port, std::string address)
 int QUIC::CloseConnection([[maybe_unused]] uint64_t sequence,
                           [[maybe_unused]] const std::string& reason,
                           [[maybe_unused]] uint64_t errorCode) {
+    utils::logger::info("CloseConnection\n");
+    auto this_connection = this->connections[sequence];
+    std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(ConnectionID(), 0, 0);
+    std::shared_ptr<payload::ConnectionCloseAppFrame> close_frame = std::make_shared<payload::ConnectionCloseAppFrame>(errorCode,reason);
+    std::shared_ptr<payload::Payload> close_payload = std::make_shared<payload::Payload>();
+    sockaddr_in addrTo = this_connection->getAddrTo();
+    std::shared_ptr<payload::Packet> close_packet = std::make_shared<payload::Packet>(header, close_payload, addrTo);
+    this_connection->insertIntoPending(close_packet);
     return 0;
 }
 
 int QUIC::SetConnectionCloseCallback(
     [[maybe_unused]] uint64_t sequence,
     [[maybe_unused]] ConnectionCloseCallbackType callback) {
+    this->ConnectionCloseCallback = callback;
     return 0;
 }
 
@@ -58,6 +67,16 @@ uint64_t QUIC::CreateStream([[maybe_unused]] uint64_t sequence,
 
 uint64_t QUIC::CloseStream([[maybe_unused]] uint64_t sequence,
                            [[maybe_unused]] uint64_t streamID) {
+    // TODO: 如果有没有发完的包，如果有的话，在这里需要全部发送
+    utils::logger::info("CloseStream\n");
+    auto this_connection = this->connections[sequence];
+    std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(ConnectionID(), 0, 0);
+    std::shared_ptr<payload::StreamFrame> stream_frame = std::make_shared<payload::StreamFrame>(streamID, nullptr, 0, 0, 0, true);
+    std::shared_ptr<payload::Payload> stream_payload = std::make_shared<payload::Payload>();
+    stream_payload->AttachFrame(stream_frame);
+    sockaddr_in addrTo = this_connection->getAddrTo();
+    std::shared_ptr<payload::Packet> stream_packet = std::make_shared<payload::Packet>(header, stream_payload, addrTo);
+    this_connection->insertIntoPending(stream_packet);
     return 0;
 }
 
@@ -66,16 +85,16 @@ uint64_t QUIC::SendData([[maybe_unused]] uint64_t sequence,
                         [[maybe_unused]] std::unique_ptr<uint8_t[]> buf,
                         [[maybe_unused]] size_t len,
                         [[maybe_unused]] bool FIN) {
-    std::cout << "sendData, streamID is " << streamID << std::endl;
+    utils::logger::info("sendData, streamID is {}\n", streamID);
+    auto this_connection = this->connections[sequence];
     // thquic::ConnectionID connection_id = this->connections[sequence]
-    std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(ConnectionID(), 0, 0);
+    std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(this->SrcID2DstID[this->Sequence2ID[sequence]], 0, 0);
     std::shared_ptr<payload::StreamFrame> stream_frame = std::make_shared<payload::StreamFrame>(streamID, std::move(buf), len, 0, len, FIN);
     std::shared_ptr<payload::Payload> stream_payload = std::make_shared<payload::Payload>();
     stream_payload->AttachFrame(stream_frame);
     sockaddr_in addrTo = this->connections[sequence]->getAddrTo();
     std::shared_ptr<payload::Packet> stream_packet = std::make_shared<payload::Packet>(header, stream_payload, addrTo);
-    std::shared_ptr<utils::UDPDatagram> stream_dg = QUIC::encodeDatagram(stream_packet);
-    this->socket.sendMsg(stream_dg);
+    this_connection->insertIntoPending(stream_packet);
     return 0;
 }
 
@@ -84,13 +103,15 @@ int QUIC::SetStreamReadyCallback(
     [[maybe_unused]] StreamReadyCallbackType callback) {
     
     QUICServer* server = static_cast<QUICServer*>(this);
-    server->streamReadyCallback = std::bind(callback, sequence, std::placeholders::_1);
+    server->streamReadyCallback = callback;
     return 0;
 }
 
 int QUIC::SetStreamDataReadyCallback(
     [[maybe_unused]] uint64_t sequence, [[maybe_unused]] uint64_t streamID,
     [[maybe_unused]] StreamDataReadyCallbackType callback) {
+    
+    this->streamDataReadyCallback = callback;
     return 0;
 }
 
@@ -115,11 +136,9 @@ int QUICClient::incomingMsg(
         case payload::PacketType::INITIAL:
         {
             utils::logger::warn("SERVER PacketType::INITIAL\n");
-            std::shared_ptr<Connection> connection = std::make_shared<Connection>();
-            connection->setAddrTo(datagram->GetAddrSrc());
-            uint64_t sequence = this->connectionSequence++;
-            this->connections[sequence] = connection;
-            this->connectionReadyCallback(sequence);
+            this->connectionReadyCallback(this->ID2Sequence[header->GetDstID()]);
+            std::shared_ptr<payload::LongHeader> lh = std::static_pointer_cast<payload::LongHeader>(header);
+            this->SrcID2DstID[header->GetDstID()] = lh->GetSrcID();
             break;
         }
         case payload::PacketType::ZERO_RTT:
@@ -147,16 +166,21 @@ int QUICServer::incomingMsg(
     payload::PacketType packetType = header->Type();
     switch (packetType) {
         case payload::PacketType::INITIAL: {
+            std::shared_ptr<Connection> connection = std::make_shared<Connection>();
+            ConnectionID id = ConnectionIDGenerator::Get().Generate();
+            connection->setAddrTo(datagram->GetAddrSrc());
+            uint64_t sequence = this->connectionSequence++;
+            this->connections[sequence] = connection;
+            this->Sequence2ID[sequence] = id; 
+            this->ID2Sequence[id] = sequence;
+            std::shared_ptr<payload::LongHeader> lh = std::static_pointer_cast<payload::LongHeader>(header);
+            this->SrcID2DstID[id] = lh->GetSrcID();
             utils::logger::warn("CLIENT PacketType::INITIAL\n");
-            std::shared_ptr<payload::Initial> initial_header = std::make_shared<payload::Initial>(config::QUIC_VERSION, ConnectionID(), ConnectionID(), 200, 200);
+            std::shared_ptr<payload::Initial> initial_header = std::make_shared<payload::Initial>(config::QUIC_VERSION, id, this->SrcID2DstID[id], 200, 200);
             std::shared_ptr<payload::Payload> initial_payload = std::make_shared<payload::Payload>();
             std::shared_ptr<payload::Packet> initial_packet = std::make_shared<payload::Packet>(initial_header, initial_payload, datagram->GetAddrSrc());
             std::shared_ptr<utils::UDPDatagram> initial_dg = QUIC::encodeDatagram(initial_packet);
             this->socket.sendMsg(initial_dg);
-            std::shared_ptr<Connection> connection = std::make_shared<Connection>();
-            connection->setAddrTo(datagram->GetAddrSrc());
-            uint64_t sequence = this->connectionSequence++;
-            this->connections[sequence] = connection;
             utils::logger::warn("CLIENT INITIAL PACKET BACK\n");
             this->connectionReadyCallback(sequence);
             break;
@@ -176,6 +200,9 @@ int QUICServer::incomingMsg(
                             this->streamReadyCallback(sequence, streamID);
                         this->streamDataReadyCallback(sequence, streamID, streamFrame->FetchBuffer(), streamFrame->GetLength(), streamFrame->FINFlag());
                         break;
+                    }
+                    case payload::FrameType::CONNECTION_CLOSE: {
+                        utils::logger::warn("CLIENT Frame Type::CONNECTION_CLOSE\n");
                     }
                 }
             }
@@ -214,7 +241,14 @@ uint64_t QUICClient::CreateConnection(
     //     AF_INET, this->socket.GetLocalPort(), {inet_addr("127.0.0.1")}, {0}
     // };
     this->addrTo = addrTo;
-    std::shared_ptr<payload::Initial> initial_header = std::make_shared<payload::Initial>(config::QUIC_VERSION, ConnectionID(), ConnectionID(), 200, 200);
+    ConnectionID id = ConnectionIDGenerator::Get().Generate();
+    std::shared_ptr<Connection> connection = std::make_shared<Connection>();
+    connection->setAddrTo(addrTo);
+    uint64_t sequence = this->connectionSequence++;
+    this->connections[sequence] = connection;
+    this->ID2Sequence[id] = sequence;
+    this->Sequence2ID[sequence] = id;
+    std::shared_ptr<payload::Initial> initial_header = std::make_shared<payload::Initial>(config::QUIC_VERSION, id, ConnectionID(), 200, 200);
     std::shared_ptr<payload::Payload> initial_payload = std::make_shared<payload::Payload>();
     std::shared_ptr<payload::Packet> initial_packet = std::make_shared<payload::Packet>(initial_header, initial_payload, addrTo);
     std::shared_ptr<utils::UDPDatagram> initial_dg = QUIC::encodeDatagram(initial_packet);
