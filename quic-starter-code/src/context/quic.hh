@@ -59,8 +59,12 @@ class QUIC {
     const PeerType type;
     utils::UDPSocket socket;
     std::map<uint64_t, std::shared_ptr<Connection>> connections;
+    std::map<ConnectionID, uint64_t> ID2Sequence;
+    std::map<uint64_t, ConnectionID> Sequence2ID;
+    std::map<ConnectionID, ConnectionID> SrcID2DstID;
     uint64_t connectionSequence;
     uint64_t stream_count[10000];
+    std::function<int(std::unique_ptr<uint8_t[]>, size_t, bool)> streamDataReadyCallback;
 };
 
 class QUICServer : public QUIC {
