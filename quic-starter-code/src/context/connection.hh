@@ -15,6 +15,7 @@ class Connection {
     int insertIntoPending(std::shared_ptr<payload::Packet> packet)
     {
         pendingPackets.push_back(packet);
+        return 0;
     }
 
    private:
