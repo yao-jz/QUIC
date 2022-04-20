@@ -102,7 +102,7 @@ int QUIC::SetStreamReadyCallback(
     [[maybe_unused]] StreamReadyCallbackType callback) {
     
     QUICServer* server = static_cast<QUICServer*>(this);
-    server->streamReadyCallback = std::bind(callback, sequence, std::placeholders::_1);
+    server->streamReadyCallback = callback;
     return 0;
 }
 
@@ -110,8 +110,7 @@ int QUIC::SetStreamDataReadyCallback(
     [[maybe_unused]] uint64_t sequence, [[maybe_unused]] uint64_t streamID,
     [[maybe_unused]] StreamDataReadyCallbackType callback) {
     
-    this->streamDataReadyCallback = std::bind(callback, sequence, streamID, std::placeholders::_1,
-                      std::placeholders::_2, std::placeholders::_3);
+    this->streamDataReadyCallback = callback;
     return 0;
 }
 
@@ -194,9 +193,9 @@ int QUICServer::incomingMsg(
                         utils::logger::warn("CLIENT Frame Type::STREAM\n");
                         std::shared_ptr<payload::StreamFrame> s_frame = std::static_pointer_cast<payload::StreamFrame>(frame);
                         // default number:
-                        uint64_t sequence = 0;
+                        uint64_t sequence = this->ID2Sequence[header->GetDstID()];
                         uint64_t stream_id = s_frame->StreamID();
-                        this->streamReadyCallback(stream_id);
+                        this->streamReadyCallback(sequence, stream_id);
                         break;
                     }
                     case payload::FrameType::CONNECTION_CLOSE: {
