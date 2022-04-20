@@ -32,6 +32,7 @@ int QUIC::CloseConnection([[maybe_unused]] uint64_t sequence,
 int QUIC::SetConnectionCloseCallback(
     [[maybe_unused]] uint64_t sequence,
     [[maybe_unused]] ConnectionCloseCallbackType callback) {
+    this->ConnectionCloseCallback = callback;
     return 0;
 }
 

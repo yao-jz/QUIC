@@ -65,6 +65,7 @@ class QUIC {
     uint64_t connectionSequence;
     uint64_t stream_count[10000];
     StreamDataReadyCallbackType streamDataReadyCallback;
+    ConnectionCloseCallbackType ConnectionCloseCallback;
 };
 
 class QUICServer : public QUIC {
