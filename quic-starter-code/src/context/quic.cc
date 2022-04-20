@@ -86,68 +86,76 @@ std::shared_ptr<utils::UDPDatagram> QUIC::encodeDatagram(
                                                 pkt->GetAddrDst(), 0);
 }
 
-/**
- * @brief 处理接收到的包
- * @param datagram 介绍到的报文
- * @return 返回包的处理结果
- * @author weiyz19
- */
-int QUIC::incomingMsg(
+
+int QUICClient::incomingMsg(
     [[maybe_unused]] std::unique_ptr<utils::UDPDatagram> datagram) {
-    //==================== start =======================//
+    
     size_t bufferLen = datagram->BufferLen();
     utils::ByteStream stream = utils::ByteStream(datagram->FetchBuffer(), bufferLen);
     utils::logger::warn("building header...\n");
     std::shared_ptr<payload::Header> header = payload::Header::Parse(stream);
     payload::PacketType packetType = header->Type();
-    // TODO: 解析负载？需要嘛？
-    switch(this->type) {
-        case PeerType::SERVER:
+    switch (packetType) {
+        case payload::PacketType::INITIAL:
         {
-            switch (packetType) {
-                case payload::PacketType::INITIAL:
-                    utils::logger::warn("SERVER PacketType::INITIAL\n");
-                    break;
-                case payload::PacketType::ZERO_RTT:
-                    utils::logger::warn("SERVER PacketType::ZERO_RTT\n");
-                    break;
-                case payload::PacketType::HANDSHAKE:
-                    utils::logger::warn("SERVER PacketType::HANDSHAKE\n");
-                    break;
-                case payload::PacketType::ONE_RTT:
-                    utils::logger::warn("SERVER PacketType::ONE_RTT\n");
-                    break;
-                case payload::PacketType::RETRY:
-                    utils::logger::warn("SERVER PacketType::RETRY\n");
-                    break;
-            }
+            utils::logger::warn("SERVER PacketType::INITIAL\n");
+            std::shared_ptr<Connection> connection = std::make_shared<Connection>();
+            uint64_t sequence = this->connectionSequence++;
+            this->connections[sequence] = connection;
+            this->connectionReadyCallback(sequence);
             break;
         }
-        case PeerType::CLIENT:
-        {
-            switch (packetType) {
-                case payload::PacketType::INITIAL:
-                    utils::logger::warn("CLIENT PacketType::INITIAL\n");
-                    break;
-                case payload::PacketType::ZERO_RTT:
-                    utils::logger::warn("CLIENT PacketType::ZERO_RTT\n");
-                    break;
-                case payload::PacketType::HANDSHAKE:
-                    utils::logger::warn("CLIENT PacketType::HANDSHAKE\n");
-                    break;
-                case payload::PacketType::ONE_RTT:
-                    utils::logger::warn("CLIENT PacketType::ONE_RTT\n");
-                    break;
-                case payload::PacketType::RETRY:
-                    utils::logger::warn("CLIENT PacketType::RETRY\n");
-                    break;
-            }
+        case payload::PacketType::ZERO_RTT:
+            utils::logger::warn("SERVER PacketType::ZERO_RTT\n");
             break;
-        }
+        case payload::PacketType::HANDSHAKE:
+            utils::logger::warn("SERVER PacketType::HANDSHAKE\n");
+            break;
+        case payload::PacketType::ONE_RTT:
+            utils::logger::warn("SERVER PacketType::ONE_RTT\n");
+            break;
+        case payload::PacketType::RETRY:
+            utils::logger::warn("SERVER PacketType::RETRY\n");
+            break;
     }
-    //==================== start =======================//
     return 0;
 }
+
+int QUICServer::incomingMsg(
+    [[maybe_unused]] std::unique_ptr<utils::UDPDatagram> datagram) {
+    size_t bufferLen = datagram->BufferLen();
+    utils::ByteStream stream = utils::ByteStream(datagram->FetchBuffer(), bufferLen);
+    utils::logger::warn("building header...\n");
+    std::shared_ptr<payload::Header> header = payload::Header::Parse(stream);
+    payload::PacketType packetType = header->Type();
+    switch (packetType) {
+        case payload::PacketType::INITIAL: {
+            utils::logger::warn("SERVER PacketType::INITIAL, sending INITIAL Packet back.\n");
+            std::shared_ptr<payload::Initial> initial_header = std::make_shared<payload::Initial>(config::QUIC_VERSION, ConnectionID(), ConnectionID(), 200, 200);
+            std::shared_ptr<payload::Payload> initial_payload = std::make_shared<payload::Payload>();
+            std::shared_ptr<payload::Packet> initial_packet = std::make_shared<payload::Packet>(initial_header, initial_payload, datagram->GetAddrSrc());
+            std::shared_ptr<utils::UDPDatagram> initial_dg = QUIC::encodeDatagram(initial_packet);
+            this->socket.sendMsg(initial_dg);
+            this->connectionReadyCallback(this->connectionSequence++);
+            break;
+        }
+        case payload::PacketType::ZERO_RTT:
+            utils::logger::warn("SERVER PacketType::ZERO_RTT\n");
+            break;
+        case payload::PacketType::HANDSHAKE:
+            utils::logger::warn("SERVER PacketType::HANDSHAKE\n");
+            break;
+        case payload::PacketType::ONE_RTT:
+            utils::logger::warn("SERVER PacketType::ONE_RTT\n");
+            break;
+        case payload::PacketType::RETRY:
+            utils::logger::warn("SERVER PacketType::RETRY\n");
+            break;
+    }
+    return 0;
+}
+
+
 
 QUICServer::QUICServer(uint16_t port, std::string address)
     : QUIC(PeerType::SERVER, port, address) {}
@@ -165,25 +173,16 @@ uint64_t QUICClient::CreateConnection(
     [[maybe_unused]] sockaddr_in& addrTo,
     [[maybe_unused]] const ConnectionReadyCallbackType& callback) {
     
-    // 设置client的ip地址
     // struct sockaddr_in addrFrom {
-    //     AF_INET, 25565, {inet_addr("127.0.0.1")}, {0}
+    //     AF_INET, this->socket.GetLocalPort(), {inet_addr("127.0.0.1")}, {0}
     // };
     std::shared_ptr<payload::Initial> initial_header = std::make_shared<payload::Initial>(config::QUIC_VERSION, ConnectionID(), ConnectionID(), 200, 200);
     std::shared_ptr<payload::Payload> initial_payload = std::make_shared<payload::Payload>();
     std::shared_ptr<payload::Packet> initial_packet = std::make_shared<payload::Packet>(initial_header, initial_payload, addrTo);
     std::shared_ptr<utils::UDPDatagram> initial_dg = QUIC::encodeDatagram(initial_packet);
-
     this->socket.sendMsg(initial_dg);
-
-    std::shared_ptr<Connection> connection = std::make_shared<Connection>();
-    uint64_t sequence = this->connectionSequence++;
-    this->connections[sequence] = connection;
-
     this->connectionReadyCallback = callback;
 
-
-   
     return 0;
 }
 

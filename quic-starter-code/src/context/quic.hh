@@ -52,7 +52,7 @@ class QUIC {
     static std::shared_ptr<utils::UDPDatagram> encodeDatagram(
         const std::shared_ptr<payload::Packet>& pkt);
 
-    int incomingMsg(std::unique_ptr<utils::UDPDatagram> datagram);
+    virtual int incomingMsg(std::unique_ptr<utils::UDPDatagram> datagram) = 0;
 
    protected:
     bool alive{true};
@@ -68,6 +68,11 @@ class QUICServer : public QUIC {
 
     int SetConnectionReadyCallback(ConnectionReadyCallbackType callback);
 
+
+   protected:
+    int incomingMsg(std::unique_ptr<utils::UDPDatagram> datagram);
+
+
    private:
     ConnectionReadyCallbackType connectionReadyCallback;
 };
@@ -78,6 +83,11 @@ class QUICClient : public QUIC {
 
     uint64_t CreateConnection(struct sockaddr_in& addrTo,
                               const ConnectionReadyCallbackType& callback);
+
+   protected:
+    int incomingMsg(std::unique_ptr<utils::UDPDatagram> datagram);
+
+
    private:
     ConnectionReadyCallbackType connectionReadyCallback;
 };
