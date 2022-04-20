@@ -95,26 +95,53 @@ std::shared_ptr<utils::UDPDatagram> QUIC::encodeDatagram(
 int QUIC::incomingMsg(
     [[maybe_unused]] std::unique_ptr<utils::UDPDatagram> datagram) {
     //==================== start =======================//
-    uint8_t* buffer = datagram->FetchBuffer().get();
-    utils::ByteStream stream = utils::ByteStream(buffer, datagram->BufferLen());
+    utils::ByteStream stream = utils::ByteStream(datagram->FetchBuffer(), datagram->BufferLen());
     std::shared_ptr<payload::Header> header = payload::Header::Parse(stream);
     payload::PacketType packetType = header->Type();
-    switch (packetType) {
-        case payload::PacketType::INITIAL:
-            utils::logger::warn("PacketType::INITIAL\n");
+    // TODO: 解析负载？需要嘛？
+    switch(this->type) {
+        case PeerType::SERVER:
+        {
+            switch (packetType) {
+                case payload::PacketType::INITIAL:
+                    utils::logger::warn("SERVER PacketType::INITIAL\n");
+                    break;
+                case payload::PacketType::ZERO_RTT:
+                    utils::logger::warn("SERVER PacketType::ZERO_RTT\n");
+                    break;
+                case payload::PacketType::HANDSHAKE:
+                    utils::logger::warn("SERVER PacketType::HANDSHAKE\n");
+                    break;
+                case payload::PacketType::ONE_RTT:
+                    utils::logger::warn("SERVER PacketType::ONE_RTT\n");
+                    break;
+                case payload::PacketType::RETRY:
+                    utils::logger::warn("SERVER PacketType::RETRY\n");
+                    break;
+            }
             break;
-        case payload::PacketType::ZERO_RTT:
-            utils::logger::warn("PacketType::ZERO_RTT\n");
+        }
+        case PeerType::CLIENT:
+        {
+            switch (packetType) {
+                case payload::PacketType::INITIAL:
+                    utils::logger::warn("CLIENT PacketType::INITIAL\n");
+                    break;
+                case payload::PacketType::ZERO_RTT:
+                    utils::logger::warn("CLIENT PacketType::ZERO_RTT\n");
+                    break;
+                case payload::PacketType::HANDSHAKE:
+                    utils::logger::warn("CLIENT PacketType::HANDSHAKE\n");
+                    break;
+                case payload::PacketType::ONE_RTT:
+                    utils::logger::warn("CLIENT PacketType::ONE_RTT\n");
+                    break;
+                case payload::PacketType::RETRY:
+                    utils::logger::warn("CLIENT PacketType::RETRY\n");
+                    break;
+            }
             break;
-        case payload::PacketType::HANDSHAKE:
-            utils::logger::warn("PacketType::HANDSHAKE\n");
-            break;
-        case payload::PacketType::ONE_RTT:
-            utils::logger::warn("PacketType::ONE_RTT\n");
-            break;
-        case payload::PacketType::RETRY:
-            utils::logger::warn("PacketType::RETRY\n");
-            break;
+        }
     }
     //==================== start =======================//
     return 0;

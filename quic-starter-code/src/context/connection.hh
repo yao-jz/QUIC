@@ -11,6 +11,12 @@ class Connection {
         return this->pendingPackets;
     }
 
+    // 将待发送包加入到队列中
+    int insertIntoPending(std::shared_ptr<payload::Packet> packet)
+    {
+        pendingPackets.push_back(packet);
+    }
+
    private:
     std::list<std::shared_ptr<payload::Packet>> pendingPackets;
 };

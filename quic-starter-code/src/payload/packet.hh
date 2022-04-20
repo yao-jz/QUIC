@@ -352,6 +352,7 @@ class LongHeader : public Header {
 
     explicit LongHeader(utils::ByteStream& stream) {
         auto buf = stream.Consume(1).first;
+        utils::logger::warn("start case: {:#b} \n", (int)(*buf));
         this->headerForm = ((*buf & 0x80) >> 7);
         assert(this->headerForm == 1);
         this->fixedBit = ((*buf & 0x40) >> 6);
