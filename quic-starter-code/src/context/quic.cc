@@ -23,6 +23,7 @@ int QUIC::CloseConnection([[maybe_unused]] uint64_t sequence,
     std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(ConnectionID(), 0, 0);
     std::shared_ptr<payload::ConnectionCloseAppFrame> close_frame = std::make_shared<payload::ConnectionCloseAppFrame>(errorCode,reason);
     std::shared_ptr<payload::Payload> close_payload = std::make_shared<payload::Payload>();
+    close_payload->AttachFrame(close_frame);
     sockaddr_in addrTo = this_connection->getAddrTo();
     std::shared_ptr<payload::Packet> close_packet = std::make_shared<payload::Packet>(header, close_payload, addrTo);
     this_connection->insertIntoPending(close_packet);
@@ -60,9 +61,9 @@ int QUIC::SocketLoop() {
 uint64_t QUIC::CreateStream([[maybe_unused]] uint64_t sequence,
                             [[maybe_unused]] bool bidirectional) {
     if(!bidirectional)
-        return uint64_t(2)|((this->stream_count[sequence]++)<<2);
+        return uint64_t(2)|((this->stream_count[sequence]++) << 2);
     else
-        return (this->stream_count[sequence]++)<<2;
+        return (this->stream_count[sequence]++) << 2;
 }
 
 uint64_t QUIC::CloseStream([[maybe_unused]] uint64_t sequence,
@@ -129,31 +130,30 @@ int QUICClient::incomingMsg(
     
     size_t bufferLen = datagram->BufferLen();
     utils::ByteStream stream = utils::ByteStream(datagram->FetchBuffer(), bufferLen);
-    utils::logger::warn("building header...\n");
     std::shared_ptr<payload::Header> header = payload::Header::Parse(stream);
     payload::PacketType packetType = header->Type();
     switch (packetType) {
         case payload::PacketType::INITIAL:
         {
-            utils::logger::warn("SERVER PacketType::INITIAL\n");
+            utils::logger::warn("SERVER PacketType::INITIAL");
             this->connectionReadyCallback(this->ID2Sequence[header->GetDstID()]);
             std::shared_ptr<payload::LongHeader> lh = std::static_pointer_cast<payload::LongHeader>(header);
             this->SrcID2DstID[header->GetDstID()] = lh->GetSrcID();
             break;
         }
         case payload::PacketType::ZERO_RTT:
-            utils::logger::warn("SERVER PacketType::ZERO_RTT\n");
+            utils::logger::warn("SERVER PacketType::ZERO_RTT");
             break;
         case payload::PacketType::HANDSHAKE:
-            utils::logger::warn("SERVER PacketType::HANDSHAKE\n");
+            utils::logger::warn("SERVER PacketType::HANDSHAKE");
             break;
         case payload::PacketType::ONE_RTT: {
-            utils::logger::warn("SERVER PacketType::ONE_RTT\n");
+            utils::logger::warn("SERVER PacketType::ONE_RTT");
             std::list<std::shared_ptr<payload::Frame>> frames = payload::Payload(stream, bufferLen - stream.Pos()).GetFrames();
             for (auto frame : frames) {
                 switch (frame->Type()) {
                     case payload::FrameType::STREAM: {
-                        utils::logger::warn("SERVER Frame Type::STREAM\n");
+                        utils::logger::warn("SERVER Frame Type::STREAM");
                         std::shared_ptr<payload::StreamFrame> streamFrame = std::static_pointer_cast<payload::StreamFrame>(frame);
                         uint64_t sequence = this->ID2Sequence[header->GetDstID()];
                         uint64_t streamID = streamFrame->StreamID();
@@ -163,7 +163,7 @@ int QUICClient::incomingMsg(
                         break;
                     }
                     case payload::FrameType::CONNECTION_CLOSE: {
-                        utils::logger::warn("SERVER Frame Type::CONNECTION_CLOSE\n");
+                        utils::logger::warn("SERVER Frame Type::CONNECTION_CLOSE");
                         uint64_t sequence = this->ID2Sequence[header->GetDstID()];
                         this->ConnectionCloseCallback(sequence, "", 0);
                     }
@@ -172,7 +172,7 @@ int QUICClient::incomingMsg(
             break;
         }
         case payload::PacketType::RETRY:
-            utils::logger::warn("SERVER PacketType::RETRY\n");
+            utils::logger::warn("SERVER PacketType::RETRY");
             break;
     }
     return 0;
@@ -182,7 +182,6 @@ int QUICServer::incomingMsg(
     [[maybe_unused]] std::unique_ptr<utils::UDPDatagram> datagram) {
     size_t bufferLen = datagram->BufferLen();
     utils::ByteStream stream = utils::ByteStream(datagram->FetchBuffer(), bufferLen);
-    utils::logger::warn("building header...\n");
     std::shared_ptr<payload::Header> header = payload::Header::Parse(stream);
     payload::PacketType packetType = header->Type();
     switch (packetType) {
@@ -196,33 +195,34 @@ int QUICServer::incomingMsg(
             this->ID2Sequence[id] = sequence;
             std::shared_ptr<payload::LongHeader> lh = std::static_pointer_cast<payload::LongHeader>(header);
             this->SrcID2DstID[id] = lh->GetSrcID();
-            utils::logger::warn("CLIENT PacketType::INITIAL\n");
+            utils::logger::warn("CLIENT PacketType::INITIAL");
             std::shared_ptr<payload::Initial> initial_header = std::make_shared<payload::Initial>(config::QUIC_VERSION, id, this->SrcID2DstID[id], 200, 200);
             std::shared_ptr<payload::Payload> initial_payload = std::make_shared<payload::Payload>();
             std::shared_ptr<payload::Packet> initial_packet = std::make_shared<payload::Packet>(initial_header, initial_payload, datagram->GetAddrSrc());
             std::shared_ptr<utils::UDPDatagram> initial_dg = QUIC::encodeDatagram(initial_packet);
             this->socket.sendMsg(initial_dg);
-            utils::logger::warn("CLIENT INITIAL PACKET BACK\n");
+            utils::logger::warn("CLIENT INITIAL PACKET BACK");
             this->connectionReadyCallback(sequence);
             break;
         }
         case payload::PacketType::ONE_RTT: {
-            utils::logger::warn("CLIENT PacketType::ONE_RTT\n");
+            utils::logger::warn("CLIENT PacketType::ONE_RTT");
             std::list<std::shared_ptr<payload::Frame>> frames = payload::Payload(stream, bufferLen - stream.Pos()).GetFrames();
             for (auto frame : frames) {
+                utils::logger::warn("CLIENT Frame Type: {}", frame->Type());
                 switch (frame->Type()) {
                     case payload::FrameType::STREAM: {
-                        utils::logger::warn("CLIENT Frame Type::STREAM\n");
                         std::shared_ptr<payload::StreamFrame> streamFrame = std::static_pointer_cast<payload::StreamFrame>(frame);
                         uint64_t sequence = this->ID2Sequence[header->GetDstID()];
                         uint64_t streamID = streamFrame->StreamID();
-                        if (this->stream_count[sequence] <= streamID)
+                        if (this->stream_count[sequence] <= streamID) {
                             this->streamReadyCallback(sequence, streamID);
+                            stream_count[sequence] = streamID + 1;
+                        }
                         this->streamDataReadyCallback(sequence, streamID, streamFrame->FetchBuffer(), streamFrame->GetLength(), streamFrame->FINFlag());
                         break;
                     }
                     case payload::FrameType::CONNECTION_CLOSE: {
-                        utils::logger::warn("CLIENT Frame Type::CONNECTION_CLOSE\n");
                         uint64_t sequence = this->ID2Sequence[header->GetDstID()];
                         this->ConnectionCloseCallback(sequence, "", 0);
                     }
@@ -231,13 +231,13 @@ int QUICServer::incomingMsg(
             break;
         }
         case payload::PacketType::HANDSHAKE:
-            utils::logger::warn("SERVER PacketType::HANDSHAKE\n");
+            utils::logger::warn("SERVER PacketType::HANDSHAKE");
             break;
         case payload::PacketType::ZERO_RTT:
-            utils::logger::warn("SERVER PacketType::ZERO_RTT\n");
+            utils::logger::warn("SERVER PacketType::ZERO_RTT");
             break;
         case payload::PacketType::RETRY:
-            utils::logger::warn("SERVER PacketType::RETRY\n");
+            utils::logger::warn("SERVER PacketType::RETRY");
             break;
     }
     return 0;
