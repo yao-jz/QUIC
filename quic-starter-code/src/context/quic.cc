@@ -168,11 +168,13 @@ int QUICServer::incomingMsg(
                 switch (frame->Type()) {
                     case payload::FrameType::STREAM: {
                         utils::logger::warn("CLIENT Frame Type::STREAM\n");
-                        std::shared_ptr<payload::StreamFrame> s_frame = std::static_pointer_cast<payload::StreamFrame>(frame);
-                        // default number:
-                        uint64_t sequence = 0;
-                        uint64_t stream_id = s_frame->StreamID();
-                        this->streamReadyCallback(stream_id);
+                        std::shared_ptr<payload::StreamFrame> streamFrame = std::static_pointer_cast<payload::StreamFrame>(frame);
+                        ConnectionID connID = header->GetDstID();
+                        uint64_t sequence = this->ID2Sequence[connID];
+                        uint64_t streamID = streamFrame->StreamID();
+                        if (this->stream_count[sequence] <= streamID)
+                            this->streamReadyCallback(sequence, streamID);
+                        this->streamDataReadyCallback(sequence, streamID, streamFrame->FetchBuffer(), streamFrame->GetLength(), streamFrame->FINFlag());
                         break;
                     }
                 }
