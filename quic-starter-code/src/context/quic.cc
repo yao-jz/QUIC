@@ -160,14 +160,17 @@ int QUICClient::incomingMsg(
     utils::ByteStream stream = utils::ByteStream(datagram->FetchBuffer(), bufferLen);
     std::shared_ptr<payload::Header> header = payload::Header::Parse(stream);
     uint64_t sequence = this->ID2Sequence[header->GetDstID()];
-    uint64_t recvPacketNumber=header->GetPacketNumber();
+    payload::PacketType packetType = header->Type();
+
     std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
 
-    this->connections[sequence]->packetRecvTime[recvPacketNumber]=now;
-    payload::PacketType packetType = header->Type();
+    // this->connections[sequence]->packetRecvTime[recvPacketNumber]=now;
+    
     switch (packetType) {
         case payload::PacketType::INITIAL: {
             std::shared_ptr<payload::Initial> ih = std::static_pointer_cast<payload::Initial>(header);
+            ih->RestoreFullPacketNumber(0);
+            uint64_t recvPacketNumber = ih->GetPacketNumber();
             utils::logger::info("RECV A INITIAL PACKET FROM SERVER");
             this->connectionReadyCallback(this->ID2Sequence[header->GetDstID()]);
             this->SrcID2DstID[header->GetDstID()] = ih->GetSrcID();
@@ -181,6 +184,7 @@ int QUICClient::incomingMsg(
             break;
         case payload::PacketType::ONE_RTT: {
             std::shared_ptr<payload::ShortHeader> sh = std::static_pointer_cast<payload::ShortHeader>(header);
+            sh->RestoreFullPacketNumber(this->connections[sequence]->getLargestAcked());
             uint64_t recvPacketNumber = sh->GetPacketNumber();
             utils::logger::info("RECV A PACKET FROM SERVER, PACKET NUMBER: {}", recvPacketNumber);
             uint64_t sequence = this->ID2Sequence[header->GetDstID()];
@@ -227,16 +231,16 @@ int QUICServer::incomingMsg(
     utils::ByteStream stream = utils::ByteStream(datagram->FetchBuffer(), bufferLen);
     std::shared_ptr<payload::Header> header = payload::Header::Parse(stream);
     uint64_t sequence = this->ID2Sequence[header->GetDstID()];
-    std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
     payload::PacketType packetType = header->Type();
+
+    std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
 
     switch (packetType) {
         case payload::PacketType::INITIAL: {
             std::shared_ptr<payload::Initial> ih = std::static_pointer_cast<payload::Initial>(header);
-            utils::logger::info("RECV A INITIAL PACKET FROM CLIENT");
+            ih->RestoreFullPacketNumber(0);
             uint64_t recvPacketNumber = ih->GetPacketNumber();
             utils::logger::info("RECV A PACKET FROM CLIENT, PACKET NUMBER: {}", recvPacketNumber);
-            this->connections[sequence]->packetRecvTime[recvPacketNumber] = now;
             std::shared_ptr<Connection> connection = std::make_shared<Connection>();
             ConnectionID id = ConnectionIDGenerator::Get().Generate();
             connection->setAddrTo(datagram->GetAddrSrc());
@@ -245,6 +249,7 @@ int QUICServer::incomingMsg(
             this->Sequence2ID[sequence] = id; 
             this->ID2Sequence[id] = sequence;
             this->SrcID2DstID[id] = ih->GetSrcID();
+            this->connections[sequence]->packetRecvTime[recvPacketNumber] = now;
             std::shared_ptr<payload::Initial> initial_header = std::make_shared<payload::Initial>(config::QUIC_VERSION, id, this->SrcID2DstID[id], this->pktnum++, connection->getLargestAcked());
             std::shared_ptr<payload::Payload> initial_payload = std::make_shared<payload::Payload>();
             std::shared_ptr<payload::Packet> initial_packet = std::make_shared<payload::Packet>(initial_header, initial_payload, datagram->GetAddrSrc());
@@ -256,6 +261,7 @@ int QUICServer::incomingMsg(
         }
         case payload::PacketType::ONE_RTT: {
             std::shared_ptr<payload::ShortHeader> sh = std::static_pointer_cast<payload::ShortHeader>(header);
+            sh->RestoreFullPacketNumber(this->connections[sequence]->getLargestAcked());
             uint64_t recvPacketNumber = sh->GetPacketNumber();
             utils::logger::info("RECV A PACKET FROM CLIENT, PACKET NUMBER: {}", recvPacketNumber);
             std::list<std::shared_ptr<payload::Frame>> frames = payload::Payload(stream, bufferLen - stream.Pos()).GetFrames();
@@ -331,7 +337,6 @@ uint64_t QUICClient::CreateConnection(
     std::shared_ptr<utils::UDPDatagram> initial_dg = QUIC::encodeDatagram(initial_packet);
     this->socket.sendMsg(initial_dg);
     this->connectionReadyCallback = callback;
-
     return 0;
 }
 
