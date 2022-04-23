@@ -9,7 +9,7 @@ class Connection {
    public:
     Connection()
     {
-        this->largestAcked = -1;
+        this->largestAcked =0;
         this->ACKRanges = utils::IntervalSet();
     }
 
