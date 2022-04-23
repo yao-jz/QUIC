@@ -56,7 +56,7 @@ class QUIC {
 
 
     bool alive{true};
-    uint64_t pktnum = 0;
+    uint64_t pktnum = 1;
     const PeerType type;
     utils::UDPSocket socket;
     std::map<uint64_t, std::shared_ptr<Connection>> connections;

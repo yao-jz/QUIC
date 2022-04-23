@@ -78,7 +78,7 @@ uint64_t QUIC::CloseStream([[maybe_unused]] uint64_t sequence,
     // TODO: 如果有没有发完的包，如果有的话，在这里需要全部发送
     utils::logger::info("CloseStream\n");
     auto this_connection = this->connections[sequence];
-    std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(ConnectionID(), this->pktnum, this_connection->getLargestAcked());
+    std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(ConnectionID(), this->pktnum++, this_connection->getLargestAcked());
     std::shared_ptr<payload::StreamFrame> stream_frame = std::make_shared<payload::StreamFrame>(streamID, nullptr, 0, 0, 0, true);
     std::shared_ptr<payload::Payload> stream_payload = std::make_shared<payload::Payload>();
     stream_payload->AttachFrame(stream_frame);
@@ -96,7 +96,7 @@ uint64_t QUIC::SendData([[maybe_unused]] uint64_t sequence,
     utils::logger::info("sendData, streamID is {}\n", streamID);
     auto this_connection = this->connections[sequence];
     // thquic::ConnectionID connection_id = this->connections[sequence]
-    std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(this->SrcID2DstID[this->Sequence2ID[sequence]], this->pktnum, this_connection->getLargestAcked());
+    std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(this->SrcID2DstID[this->Sequence2ID[sequence]], this->pktnum++, this_connection->getLargestAcked());
     std::shared_ptr<payload::StreamFrame> stream_frame = std::make_shared<payload::StreamFrame>(streamID, std::move(buf), len, 0, len, FIN);
     std::shared_ptr<payload::Payload> stream_payload = std::make_shared<payload::Payload>();
     stream_payload->AttachFrame(stream_frame);
@@ -221,6 +221,12 @@ int QUICServer::incomingMsg(
     size_t bufferLen = datagram->BufferLen();
     utils::ByteStream stream = utils::ByteStream(datagram->FetchBuffer(), bufferLen);
     std::shared_ptr<payload::Header> header = payload::Header::Parse(stream);
+    uint64_t sequence = this->ID2Sequence[header->GetDstID()];
+    uint64_t recvPacketNumber=header->GetPacketNumber();
+    std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+
+    this->connections[sequence]->packetRecvTime[recvPacketNumber]=now;
+
     payload::PacketType packetType = header->Type();
     switch (packetType) {
         case payload::PacketType::INITIAL: {

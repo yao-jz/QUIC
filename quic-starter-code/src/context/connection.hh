@@ -7,8 +7,9 @@ namespace thquic::context {
 
 class Connection {
    public:
-    Connection() {
-        this->largestAcked = -1;
+    Connection()
+    {
+        this->largestAcked =0;
         this->ACKRanges = utils::IntervalSet();
     }
 
@@ -91,8 +92,8 @@ class Connection {
     int64_t largestAcked;
     utils::IntervalSet ACKRanges;
     public:
-    std::map<int64_t, time_t> packetSendTime;
-    std::map<int64_t, time_t> packetRecvTime;
+    std::map<uint64_t, std::chrono::steady_clock::time_point> packetSendTime;
+    std::map<uint64_t, std::chrono::steady_clock::time_point> packetRecvTime;
 };
 
 }  // namespace thquic::context
