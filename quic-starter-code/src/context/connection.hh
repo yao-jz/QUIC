@@ -36,11 +36,26 @@ class Connection {
             std::shared_ptr<payload::ACKFrame> ackFrame = std::make_shared<payload::ACKFrame>(20, this->ACKRanges);// todo ACKDelay?
             packet->GetPktPayload()->AttachFrame(ackFrame);
         }
-        else
-        {
-            // 没有需要发送的包，但有收到的包快要超过ack时限了
 
-        }
+        // 这里获取不了参数，放到外面
+        // else
+        // {
+        //     // 没有需要发送的包，但有收到的包快要超过ack时限了
+        //     for(auto pair : packetRecvTime)
+        //     {
+        //         bool flag = false;
+        //         std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+        //         if(duration_cast<std::chrono::milliseconds>(now - pair.second).count() > 7500)// todo 最大 ack 回复延迟
+        //         {
+        //             flag = true;
+        //             break;
+        //         }
+        //     }
+        //     if(flag)
+        //     {
+        //         // 构建一个新包，然后发出去
+        //     }
+        // }
         return this->pendingPackets;
     }
     
@@ -92,7 +107,6 @@ class Connection {
     int64_t largestAcked;
     utils::IntervalSet ACKRanges;
     public:
-    std::map<uint64_t, std::chrono::steady_clock::time_point> packetSendTime;
     std::map<uint64_t, std::chrono::steady_clock::time_point> packetRecvTime;
 };
 
