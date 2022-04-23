@@ -7,6 +7,12 @@ namespace thquic::context {
 
 class Connection {
    public:
+    Connection()
+    {
+        this->largestAcked = -1;
+        this->ACKRanges = utils::IntervalSet();
+    }
+
     std::list<std::shared_ptr<payload::Packet>>& GetPendingPackets() {
         return this->pendingPackets;
     }
@@ -17,6 +23,7 @@ class Connection {
         pendingPackets.push_back(packet);
         return 0;
     }
+
     void setAddrTo(struct sockaddr_in addr)
     {
         this->addrTo = addr;
@@ -30,6 +37,8 @@ class Connection {
    private:
     std::list<std::shared_ptr<payload::Packet>> pendingPackets;
     struct sockaddr_in addrTo;
+    int64_t largestAcked;
+    utils::IntervalSet ACKRanges;
 };
 
 }  // namespace thquic::context
