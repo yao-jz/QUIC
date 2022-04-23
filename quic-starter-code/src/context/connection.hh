@@ -61,26 +61,26 @@ class Connection {
         return this->addrTo;
     }
 
-    void insertIntoUnAckedPackets(uint64_t order,std::shared_ptr<payload::Packet> pac)
+    void insertIntoUnAckedPackets(uint64_t packetNumber, std::shared_ptr<payload::Packet> packet)
     {
-        this->unAckedPackets[order] = pac;
+        this->unAckedPackets[packetNumber] = packet;
     }
 
-    void removeFromUnAckedPackets(uint64_t order)
+    void removeFromUnAckedPackets(uint64_t packetNumber)
     {
-        this->unAckedPackets.erase(order);
+        this->unAckedPackets.erase(packetNumber);
     }
 
-    std::shared_ptr<payload::Packet> getUnAckedPacket(uint64_t order)
+    std::shared_ptr<payload::Packet> getUnAckedPacket(uint64_t packetNumber)
     {
-        return this->unAckedPackets[order];
+        return this->unAckedPackets[packetNumber];
     }
 
     int64_t getLargestAcked() {
         return this->largestAcked;
     }
 
-    utils::IntervalSet getACKRanges(){
+    utils::IntervalSet& getACKRanges(){
         return this->ACKRanges;
     }
 
@@ -92,6 +92,9 @@ class Connection {
     struct sockaddr_in addrTo;
     int64_t largestAcked;
     utils::IntervalSet ACKRanges;
+    public:
+    std::map<int64_t, time_t> packetSendTime;
+    std::map<int64_t, time_t> packetRecvTime;
 };
 
 }  // namespace thquic::context

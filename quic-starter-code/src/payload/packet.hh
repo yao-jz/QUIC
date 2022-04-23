@@ -738,6 +738,5 @@ class Packet : Serialization {
     utils::timepoint sendTimestamp;
     utils::timepoint recvTimestamp;
 };
-
 }  // namespace thquic::payload
 #endif

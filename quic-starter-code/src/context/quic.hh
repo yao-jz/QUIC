@@ -51,11 +51,12 @@ class QUIC {
    protected:
     static std::shared_ptr<utils::UDPDatagram> encodeDatagram(
         const std::shared_ptr<payload::Packet>& pkt);
-
     virtual int incomingMsg(std::unique_ptr<utils::UDPDatagram> datagram) = 0;
+    void handleACKFrame(std::shared_ptr<payload::ACKFrame> ackFrame, uint_64 sequence);
 
-   protected:
+
     bool alive{true};
+    uint64_t pktnum = 0;
     const PeerType type;
     utils::UDPSocket socket;
     std::map<uint64_t, std::shared_ptr<Connection>> connections;
