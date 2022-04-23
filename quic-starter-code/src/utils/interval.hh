@@ -39,6 +39,7 @@ class Interval {
         return (this->start == interval.start) && (this->end == interval.end);
     }
 
+    // the range of interval is [start, end]
     PointCompResult PointComp(uint64_t n) const {
         if ((this->start != 0) && (n < this->start - 1)) {
             return PointCompResult::LEFT;
