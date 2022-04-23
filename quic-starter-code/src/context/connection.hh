@@ -85,7 +85,6 @@ class Connection {
     }
 
     
-
    private:
     std::list<std::shared_ptr<payload::Packet>> pendingPackets;
     std::map<uint64_t,std::shared_ptr<payload::Packet>> unAckedPackets; // packetnum to packet
