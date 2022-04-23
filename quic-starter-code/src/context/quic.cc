@@ -219,6 +219,12 @@ int QUICServer::incomingMsg(
     size_t bufferLen = datagram->BufferLen();
     utils::ByteStream stream = utils::ByteStream(datagram->FetchBuffer(), bufferLen);
     std::shared_ptr<payload::Header> header = payload::Header::Parse(stream);
+    uint64_t sequence = this->ID2Sequence[header->GetDstID()];
+    uint64_t recvPacketNumber=header->GetPacketNumber();
+    std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+
+    this->connections[sequence]->packetRecvTime[recvPacketNumber]=now;
+
     payload::PacketType packetType = header->Type();
     utils::logger::info("RECV A PACKET FROM CLIENT, PACKET NUMBER: {}", header->GetPacketNumber());
     switch (packetType) {
