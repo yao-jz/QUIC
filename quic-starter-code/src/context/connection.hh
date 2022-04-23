@@ -23,7 +23,7 @@ class Connection {
         for(auto packet_pair : unAckedPackets)
         {
             std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
-            if(duration_cast<milliseconds>(now - packet_pair.second->GetSendTimestamp()).count() > 7500)
+            if(duration_cast<std::chrono::milliseconds>(now - packet_pair.second->GetSendTimestamp()).count() > 7500)
             {
                 this->pendingPackets.push_back(packet_pair.second);
             }
