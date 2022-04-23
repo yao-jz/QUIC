@@ -25,7 +25,7 @@ int QUIC::CloseConnection([[maybe_unused]] uint64_t sequence,
                           [[maybe_unused]] uint64_t errorCode) {
     utils::logger::info("CloseConnection\n");
     auto this_connection = this->connections[sequence];
-    std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(ConnectionID(), 0, 0);
+    std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(ConnectionID(), this->pktnum++, this_connection->getLargestAcked());
     std::shared_ptr<payload::ConnectionCloseAppFrame> close_frame = std::make_shared<payload::ConnectionCloseAppFrame>(errorCode,reason);
     std::shared_ptr<payload::Payload> close_payload = std::make_shared<payload::Payload>();
     close_payload->AttachFrame(close_frame);

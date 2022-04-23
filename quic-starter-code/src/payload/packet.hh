@@ -689,7 +689,7 @@ class Packet : Serialization {
 
     std::shared_ptr<Header> GetPktHeader() { return this->header; }
 
-    std::shared_ptr<Payload>& GetPktPayload() { return this->payload; }
+    std::shared_ptr<Payload> GetPktPayload() { return this->payload; }
 
     const struct sockaddr_in& GetAddrSrc() const { return this->addrSrc; }
 
