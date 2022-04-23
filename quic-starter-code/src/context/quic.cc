@@ -1,7 +1,12 @@
 #include <iostream>
+#include <time.h>
+#include <ctime>
+#include <ratio>
+#include <chrono>
 #include "quic.hh"
 
 namespace thquic::context {
+
 thquic::context::QUIC::QUIC(thquic::context::PeerType type) : type(type), connectionSequence(0) {
     if (type != PeerType::CLIENT) {
         throw std::invalid_argument("illegal client context config");
@@ -44,11 +49,11 @@ int QUIC::SocketLoop() {
         if (datagram) {
             this->incomingMsg(std::move(datagram));
         }
-
-
         for (auto& connection : this->connections) {
             auto& pendingPackets = connection.second->GetPendingPackets();
             while (!pendingPackets.empty()) {
+                std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+                pendingPackets.front()->MarkSendTimestamp(now);
                 auto newDatagram = QUIC::encodeDatagram(pendingPackets.front());
                 this->socket.sendMsg(newDatagram);
                 this->unAckedPackets[pendingPackets.front()->GetPacketNumber()] = pendingPackets.front();
@@ -259,14 +264,9 @@ QUICClient::QUICClient() : QUIC(PeerType::CLIENT) {}
 uint64_t QUICClient::CreateConnection(
     [[maybe_unused]] sockaddr_in& addrTo,
     [[maybe_unused]] const ConnectionReadyCallbackType& callback) {
-    
-    // struct sockaddr_in addrFrom {
-    //     AF_INET, this->socket.GetLocalPort(), {inet_addr("127.0.0.1")}, {0}
-    // };
     this->addrTo = addrTo;
     ConnectionID id = ConnectionIDGenerator::Get().Generate();
     std::shared_ptr<Connection> connection = std::make_shared<Connection>();
-
     connection->setAddrTo(addrTo);
     uint64_t sequence = this->connectionSequence++;
     this->connections[sequence] = connection;

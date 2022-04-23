@@ -49,6 +49,9 @@ class Connection {
     struct sockaddr_in addrTo;
     int64_t largestAcked;
     utils::IntervalSet ACKRanges;
+    public:
+    std::map<int64_t, time_t> packetSendTime;
+    std::map<int64_t, time_t> packetRecvTime;
 };
 
 }  // namespace thquic::context
