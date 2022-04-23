@@ -51,10 +51,10 @@ class QUIC {
    protected:
     static std::shared_ptr<utils::UDPDatagram> encodeDatagram(
         const std::shared_ptr<payload::Packet>& pkt);
-
     virtual int incomingMsg(std::unique_ptr<utils::UDPDatagram> datagram) = 0;
+    void handleACKFrame(std::shared_ptr<payload::ACKFrame> ackFrame, uint_64 sequence);
 
-   protected:
+
     bool alive{true};
     const PeerType type;
     utils::UDPSocket socket;
@@ -66,8 +66,6 @@ class QUIC {
     uint64_t stream_count[10000];
     StreamDataReadyCallbackType streamDataReadyCallback;
     ConnectionCloseCallbackType ConnectionCloseCallback;
-    uint64_t pktnum = 0;
-    std::map<uint64_t,std::shared_ptr<payload::Packet>> unAckedPackets; // packetnum to packet
 };
 
 class QUICServer : public QUIC {

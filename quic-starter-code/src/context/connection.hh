@@ -34,11 +34,26 @@ class Connection {
         return this->addrTo;
     }
 
+    void insertIntoUnAckedPackets(uint64_t packetNumber, std::shared_ptr<payload::Packet> packet)
+    {
+        this->unAckedPackets[packetNumber] = packet;
+    }
+
+    void removeFromUnAckedPackets(uint64_t packetNumber)
+    {
+        this->unAckedPackets.erase(packetNumber);
+    }
+
+    std::shared_ptr<payload::Packet> getUnAckedPacket(uint64_t packetNumber)
+    {
+        return this->unAckedPackets[packetNumber];
+    }
+
     int64_t getLargestAcked() {
         return this->largestAcked;
     }
 
-    utils::IntervalSet getACKRanges(){
+    utils::IntervalSet& getACKRanges(){
         return this->ACKRanges;
     }
 
@@ -46,6 +61,7 @@ class Connection {
 
    private:
     std::list<std::shared_ptr<payload::Packet>> pendingPackets;
+    std::map<uint64_t,std::shared_ptr<payload::Packet>> unAckedPackets; // packetnum to packet
     struct sockaddr_in addrTo;
     int64_t largestAcked;
     utils::IntervalSet ACKRanges;
