@@ -230,9 +230,14 @@ int QUICServer::incomingMsg(
                     case payload::FrameType::ACK: {
                         std::shared_ptr<payload::ACKFrame> ackFrame = std::static_pointer_cast<payload::ACKFrame>(frame);
                         uint64_t largestAcked = ackFrame->GetLargestACKed();
-                        utils::IntervalSet ranges = ackFrame->GetACKRanges();
-                        // remove acked packet
-                        
+                        // remove acked packets
+                        std::list<utils::Interval> ackedIntervals = ackFrame->GetACKRanges().Intervals();
+                        for (utils::Interval interval : ackedIntervals) {
+                            utils::logger::warn("ACKED PACKETS: START = {}, END = {}", interval.Start(), interval.End());
+                            for (uint64_t i = interval.Start(); i <= interval.End(); i++) {
+                                this->connections[sequence];
+                            }
+                        }
                         // retransmission loss packet
                     }
                     case payload::FrameType::CONNECTION_CLOSE: {
