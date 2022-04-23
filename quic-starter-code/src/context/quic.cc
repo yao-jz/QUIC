@@ -23,6 +23,7 @@ int QUIC::CloseConnection([[maybe_unused]] uint64_t sequence,
     std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(ConnectionID(), 0, 0);
     std::shared_ptr<payload::ConnectionCloseAppFrame> close_frame = std::make_shared<payload::ConnectionCloseAppFrame>(errorCode,reason);
     std::shared_ptr<payload::Payload> close_payload = std::make_shared<payload::Payload>();
+    close_payload->AttachFrame(close_frame);
     sockaddr_in addrTo = this_connection->getAddrTo();
     std::shared_ptr<payload::Packet> close_packet = std::make_shared<payload::Packet>(header, close_payload, addrTo);
     this_connection->insertIntoPending(close_packet);
