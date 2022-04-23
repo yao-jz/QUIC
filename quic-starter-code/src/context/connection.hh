@@ -17,6 +17,33 @@ class Connection {
         return this->pendingPackets;
     }
 
+    std::list<std::shared_ptr<payload::Packet>>& getPackets()
+    {
+        // 超时重传
+        for(auto packet_pair : unAckedPackets)
+        {
+            std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+            if(duration_cast<milliseconds>(now - packet_pair.second->GetSendTimestamp()).count() > 7500)
+            {
+                this->pendingPackets.push_back(packet_pair.second);
+            }
+        }
+
+
+        if(!pendingPackets.empty() && !this->ACKRanges.Empty())
+        {
+            std::shared_ptr<payload::Packet> packet = pendingPackets.front();
+            std::shared_ptr<payload::ACKFrame> ackFrame = std::make_shared<payload::ACKFrame>(20, this->ACKRanges);// todo ACKDelay?
+            packet->GetPktPayload()->AttachFrame(ackFrame);
+        }
+        else
+        {
+            // 没有需要发送的包，但有收到的包快要超过ack时限了
+
+        }
+        return this->pendingPackets;
+    }
+    
     // 将待发送包加入到队列中
     int insertIntoPending(std::shared_ptr<payload::Packet> packet)
     {
@@ -44,11 +71,11 @@ class Connection {
         this->unAckedPackets.erase(order);
     }
 
-    std::shared_ptr<payload::Packet> getUnAckedPacke(uint64_t order)
+    std::shared_ptr<payload::Packet> getUnAckedPacket(uint64_t order)
     {
         return this->unAckedPackets[order];
     }
-    
+
     int64_t getLargestAcked() {
         return this->largestAcked;
     }
