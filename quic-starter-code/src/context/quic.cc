@@ -51,7 +51,7 @@ int QUIC::SocketLoop() {
             while (!pendingPackets.empty()) {
                 auto newDatagram = QUIC::encodeDatagram(pendingPackets.front());
                 this->socket.sendMsg(newDatagram);
-                this->unAckedPackets[pendingPackets.front()->GetPacketNumber()] = pendingPackets.front();
+                connection.second->insertIntoUnAckedPackets(pendingPackets.front()->GetPacketNumber(), pendingPackets.front());
                 pendingPackets.pop_front();
             }
         }
