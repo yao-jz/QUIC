@@ -228,8 +228,11 @@ int QUICServer::incomingMsg(
                     }
                     case payload::FrameType::ACK: {
                         std::shared_ptr<payload::ACKFrame> ackFrame = std::static_pointer_cast<payload::ACKFrame>(frame);
-                        ackFrame->GetLargestACKed();
-                        ackFrame->GetACKRanges();
+                        uint64_t largestAcked = ackFrame->GetLargestACKed();
+                        utils::IntervalSet ranges = ackFrame->GetACKRanges();
+                        // remove acked packet
+                        
+                        // retransmission loss packet
                     }
                     case payload::FrameType::CONNECTION_CLOSE: {
                         this->ConnectionCloseCallback(sequence, "", 0);
