@@ -131,15 +131,14 @@ std::shared_ptr<utils::UDPDatagram> QUIC::encodeDatagram(
 }
 
 
-void QUIC::handleACKFrame(std::shared_ptr<payload::Frame> frame, uint_64 sequence) {
-    std::shared_ptr<payload::ACKFrame> ackFrame = std::static_pointer_cast<payload::ACKFrame>(frame);
+void QUIC::handleACKFrame(std::shared_ptr<payload::ACKFrame> ackFrame, uint64_t sequence) {
     std::list<utils::Interval> ackedIntervals = ackFrame->GetACKRanges().Intervals();
     for (utils::Interval interval : ackedIntervals) {
         utils::logger::warn("ACKED PACKETS: START = {}, END = {}", interval.Start(), interval.End());
         for (uint64_t packetNumber = interval.Start(); packetNumber <= interval.End(); packetNumber++) {
             // change tracking interval
-            payload::Packet packet = this->connections[sequence]->getUnAckedPacket(packetNumber);
-            for (auto frame : packet.GetPktPayload().GetFrames()) {
+            std::shared_ptr<thquic::payload::Packet> packet = this->connections[sequence]->getUnAckedPacket(packetNumber);
+            for (auto frame : packet->GetPktPayload()->GetFrames()) {
                 if(frame->Type() == payload::FrameType::ACK) {
                     std::shared_ptr<payload::ACKFrame> subFrame = std::static_pointer_cast<payload::ACKFrame>(frame);
                     uint64_t largestAcked = subFrame->GetLargestACKed();
@@ -179,6 +178,7 @@ int QUICClient::incomingMsg(
         case payload::PacketType::ONE_RTT: {
             utils::logger::warn("SERVER PacketType::ONE_RTT");
             uint64_t sequence = this->ID2Sequence[header->GetDstID()];
+            uint64_t recvPacketNumber = header->GetPacketNumber();
             bool ackEliciting = false;
             std::list<std::shared_ptr<payload::Frame>> frames = payload::Payload(stream, bufferLen - stream.Pos()).GetFrames();
             for (auto frame : frames) {
@@ -198,7 +198,8 @@ int QUICClient::incomingMsg(
                         this->ConnectionCloseCallback(sequence, "", 0);
                     }
                     case payload::FrameType::ACK:{
-                        this->handleACKFrame(frame, sequence);
+                        std::shared_ptr<payload::ACKFrame> ackFrame = std::static_pointer_cast<payload::ACKFrame>(frame);
+                        this->handleACKFrame(ackFrame, sequence);
                     }
                 }
             }
@@ -263,7 +264,8 @@ int QUICServer::incomingMsg(
                         break;
                     }
                     case payload::FrameType::ACK: {
-                        this->handleACKFrame(frame, sequence);
+                        std::shared_ptr<payload::ACKFrame> ackFrame = std::static_pointer_cast<payload::ACKFrame>(frame);
+                        this->handleACKFrame(ackFrame, sequence);
                     }
                     case payload::FrameType::CONNECTION_CLOSE: {
                         this->ConnectionCloseCallback(sequence, "", 0);
