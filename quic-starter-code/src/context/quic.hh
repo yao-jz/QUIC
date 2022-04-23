@@ -66,6 +66,8 @@ class QUIC {
     uint64_t stream_count[10000];
     StreamDataReadyCallbackType streamDataReadyCallback;
     ConnectionCloseCallbackType ConnectionCloseCallback;
+    uint64_t pktnum = 0;
+    std::map<uint64_t,std::shared_ptr<payload::Packet>> unAckedPackets; // packetnum to packet
 };
 
 class QUICServer : public QUIC {

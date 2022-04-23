@@ -48,6 +48,16 @@ class Connection {
     {
         return this->unAckedPackets[order];
     }
+    
+    int64_t getLargestAcked() {
+        return this->largestAcked;
+    }
+
+    utils::IntervalSet getACKRanges(){
+        return this->ACKRanges;
+    }
+
+    
 
    private:
     std::list<std::shared_ptr<payload::Packet>> pendingPackets;
