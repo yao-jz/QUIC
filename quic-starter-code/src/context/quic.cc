@@ -236,7 +236,6 @@ int QUICServer::incomingMsg(
             utils::logger::info("RECV A INITIAL PACKET FROM CLIENT");
             uint64_t recvPacketNumber = ih->GetPacketNumber();
             utils::logger::info("RECV A PACKET FROM CLIENT, PACKET NUMBER: {}", recvPacketNumber);
-            this->connections[sequence]->packetRecvTime[recvPacketNumber] = now;
             std::shared_ptr<Connection> connection = std::make_shared<Connection>();
             ConnectionID id = ConnectionIDGenerator::Get().Generate();
             connection->setAddrTo(datagram->GetAddrSrc());
@@ -245,6 +244,7 @@ int QUICServer::incomingMsg(
             this->Sequence2ID[sequence] = id; 
             this->ID2Sequence[id] = sequence;
             this->SrcID2DstID[id] = ih->GetSrcID();
+            this->connections[sequence]->packetRecvTime[recvPacketNumber] = now;
             std::shared_ptr<payload::Initial> initial_header = std::make_shared<payload::Initial>(config::QUIC_VERSION, id, this->SrcID2DstID[id], this->pktnum++, connection->getLargestAcked());
             std::shared_ptr<payload::Payload> initial_payload = std::make_shared<payload::Payload>();
             std::shared_ptr<payload::Packet> initial_packet = std::make_shared<payload::Packet>(initial_header, initial_payload, datagram->GetAddrSrc());
