@@ -7,8 +7,7 @@ namespace thquic::context {
 
 class Connection {
    public:
-    Connection()
-    {
+    Connection() {
         this->largestAcked = -1;
         this->ACKRanges = utils::IntervalSet();
     }

@@ -53,6 +53,7 @@ int QUIC::SocketLoop() {
             auto& pendingPackets = connection.second->GetPendingPackets();
             while (!pendingPackets.empty()) {
                 std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+                utils::logger::info("SEND A PACKET, NUMBER = {}", pendingPackets.front()->GetPacketNumber());
                 pendingPackets.front()->MarkSendTimestamp(now);
                 auto newDatagram = QUIC::encodeDatagram(pendingPackets.front());
                 this->socket.sendMsg(newDatagram);
@@ -159,11 +160,10 @@ int QUICClient::incomingMsg(
     utils::ByteStream stream = utils::ByteStream(datagram->FetchBuffer(), bufferLen);
     std::shared_ptr<payload::Header> header = payload::Header::Parse(stream);
     payload::PacketType packetType = header->Type();
-    utils::logger::info("RECV A PACKET FROM SERVER, PACKET NUMBER: {}", header->GetPacketNumber());
+    
     switch (packetType) {
-        case payload::PacketType::INITIAL:
-        {
-            utils::logger::warn("SERVER PacketType::INITIAL");
+        case payload::PacketType::INITIAL: {
+            utils::logger::info("RECV A INITIAL PACKET FROM SERVER");
             this->connectionReadyCallback(this->ID2Sequence[header->GetDstID()]);
             std::shared_ptr<payload::LongHeader> lh = std::static_pointer_cast<payload::LongHeader>(header);
             this->SrcID2DstID[header->GetDstID()] = lh->GetSrcID();
@@ -176,9 +176,10 @@ int QUICClient::incomingMsg(
             utils::logger::warn("SERVER PacketType::HANDSHAKE");
             break;
         case payload::PacketType::ONE_RTT: {
-            utils::logger::warn("SERVER PacketType::ONE_RTT");
+            std::shared_ptr<payload::ShortHeader> sh = std::static_pointer_cast<payload::ShortHeader>(header);
+            uint64_t recvPacketNumber = sh->GetPacketNumber();
+            utils::logger::info("RECV A PACKET FROM SERVER, PACKET NUMBER: {}", recvPacketNumber);
             uint64_t sequence = this->ID2Sequence[header->GetDstID()];
-            uint64_t recvPacketNumber = header->GetPacketNumber();
             bool ackEliciting = false;
             std::list<std::shared_ptr<payload::Frame>> frames = payload::Payload(stream, bufferLen - stream.Pos()).GetFrames();
             for (auto frame : frames) {
@@ -221,9 +222,9 @@ int QUICServer::incomingMsg(
     utils::ByteStream stream = utils::ByteStream(datagram->FetchBuffer(), bufferLen);
     std::shared_ptr<payload::Header> header = payload::Header::Parse(stream);
     payload::PacketType packetType = header->Type();
-    utils::logger::info("RECV A PACKET FROM CLIENT, PACKET NUMBER: {}", header->GetPacketNumber());
     switch (packetType) {
         case payload::PacketType::INITIAL: {
+            utils::logger::info("RECV A INITIAL PACKET FROM CLIENT");
             std::shared_ptr<Connection> connection = std::make_shared<Connection>();
             ConnectionID id = ConnectionIDGenerator::Get().Generate();
             connection->setAddrTo(datagram->GetAddrSrc());
@@ -233,7 +234,6 @@ int QUICServer::incomingMsg(
             this->ID2Sequence[id] = sequence;
             std::shared_ptr<payload::LongHeader> lh = std::static_pointer_cast<payload::LongHeader>(header);
             this->SrcID2DstID[id] = lh->GetSrcID();
-            utils::logger::warn("CLIENT PacketType::INITIAL");
             std::shared_ptr<payload::Initial> initial_header = std::make_shared<payload::Initial>(config::QUIC_VERSION, id, this->SrcID2DstID[id], this->pktnum++, connection->getLargestAcked());
             std::shared_ptr<payload::Payload> initial_payload = std::make_shared<payload::Payload>();
             std::shared_ptr<payload::Packet> initial_packet = std::make_shared<payload::Packet>(initial_header, initial_payload, datagram->GetAddrSrc());
@@ -244,10 +244,11 @@ int QUICServer::incomingMsg(
             break;
         }
         case payload::PacketType::ONE_RTT: {
-            utils::logger::warn("CLIENT PacketType::ONE_RTT");
+            std::shared_ptr<payload::ShortHeader> sh = std::static_pointer_cast<payload::ShortHeader>(header);
+            uint64_t recvPacketNumber = sh->GetPacketNumber();
+            utils::logger::info("RECV A PACKET FROM CLIENT, PACKET NUMBER: {}", recvPacketNumber);
             std::list<std::shared_ptr<payload::Frame>> frames = payload::Payload(stream, bufferLen - stream.Pos()).GetFrames();
             uint64_t sequence = this->ID2Sequence[header->GetDstID()];
-            uint64_t recvPacketNumber = header->GetPacketNumber();
             bool ackEliciting = false;
             for (auto frame : frames) {
                 utils::logger::warn("CLIENT Frame Type: {}", frame->Type());
