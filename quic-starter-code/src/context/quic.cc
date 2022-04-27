@@ -61,8 +61,8 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
             uint64_t full = this->pktnum++;
             // reencode the packet number (because the length field may be changed)
             utils::TruncatedPacketNumber truncated = utils::encodePacketNumber(full, connection->getLargestAcked());
-            mixin->SetTruncatedPacketNumber(truncated.first, truncated.second);
-            mixin->SetFullPacketNumber(full);
+            mixin->ChangeTruncatedPacketNumber(truncated.first, truncated.second);
+            mixin->ChangeFullPacketNumber(full);
             connection->insertIntoPending(unAckedPacket);
             packetNumsDel.push_back(packet_pair.first);
         }
@@ -141,7 +141,7 @@ int QUIC::SocketLoop() {
                 pendingPackets.front()->MarkSendTimestamp(now);
                 auto newDatagram = QUIC::encodeDatagram(pendingPackets.front());
                 this->socket.sendMsg(newDatagram);
-                if(connection.second->getIsAlive()) connection.second->insertIntoUnAckedPackets(pendingPackets.front()->GetPacketNumber(), pendingPackets.front());
+                if(pendingPackets.front()->IsACKEliciting()) connection.second->insertIntoUnAckedPackets(pendingPackets.front()->GetPacketNumber(), pendingPackets.front());
                 pendingPackets.pop_front();
             }
         }

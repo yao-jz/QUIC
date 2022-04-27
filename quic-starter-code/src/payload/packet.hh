@@ -77,6 +77,16 @@ class PacketNumberMixin {
         this->fullPacketNumber = full;
     }
 
+    void ChangeTruncatedPacketNumber(uint32_t truncated, uint8_t length) {
+        assert(truncatedPacketNumber.has_value());
+        this->truncatedPacketNumber = std::make_pair(truncated, length);
+    }
+
+    void ChangeFullPacketNumber(uint32_t full) {
+        assert(fullPacketNumber.has_value());
+        this->fullPacketNumber = full;
+    }
+
     void RestoreFullPacketNumber(uint64_t largestPacketNumber) {
         assert(truncatedPacketNumber.has_value() &&
                !fullPacketNumber.has_value());
