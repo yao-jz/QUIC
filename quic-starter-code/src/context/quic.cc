@@ -285,6 +285,9 @@ int QUICClient::incomingMsg(
                         std::shared_ptr<payload::ACKFrame> ackFrame = std::static_pointer_cast<payload::ACKFrame>(frame);
                         this->handleACKFrame(ackFrame, sequence);
                     }
+                    case payload::FrameType::PING:{
+                        ackEliciting = true;
+                    }
                 }
             }
             if (ackEliciting) {
@@ -363,6 +366,9 @@ int QUICServer::incomingMsg(
                     }
                     case payload::FrameType::CONNECTION_CLOSE: {
                         this->ConnectionCloseCallback(sequence, "", 0);
+                    }
+                    case payload::FrameType::PING: {
+                        ackEliciting = true;
                     }
                 }
             }
