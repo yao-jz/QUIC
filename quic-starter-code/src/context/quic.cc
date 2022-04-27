@@ -253,15 +253,10 @@ int QUICClient::incomingMsg(
     uint64_t sequence = this->ID2Sequence[header->GetDstID()];
     payload::PacketType packetType = header->Type();
 
-    std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
-
-    // this->connections[sequence]->packetRecvTime[recvPacketNumber]=now;
-    
     switch (packetType) {
         case payload::PacketType::INITIAL: {
             std::shared_ptr<payload::Initial> ih = std::static_pointer_cast<payload::Initial>(header);
             ih->RestoreFullPacketNumber(0);
-            uint64_t recvPacketNumber = ih->GetPacketNumber();
             utils::logger::info("RECV A INITIAL PACKET FROM SERVER");
             this->connectionReadyCallback(this->ID2Sequence[header->GetDstID()]);
             this->SrcID2DstID[header->GetDstID()] = ih->GetSrcID();
