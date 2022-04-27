@@ -410,9 +410,7 @@ class Initial : public PacketNumberMixin, public LongHeader {
           LongHeader(version, srcConnID, dstConnID, PacketType::INITIAL),
           tokenLength{0},
           token{},
-          length{this->GetTruncatedPacketNumberLength()} {
-              std::
-          }
+          length{this->GetTruncatedPacketNumberLength()} {}
 
     explicit Initial(utils::ByteStream& stream) : LongHeader(stream), token{} {
         this->tokenLength = utils::decodeVarInt(stream);

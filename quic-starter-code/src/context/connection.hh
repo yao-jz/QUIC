@@ -34,6 +34,7 @@ class Connection {
         {
             std::shared_ptr<payload::Packet> packet = pendingPackets.front();
             std::shared_ptr<payload::ACKFrame> ackFrame = std::make_shared<payload::ACKFrame>(20, this->ACKRanges);// todo ACKDelay?
+            packetRecvTime.clear();
             packet->GetPktPayload()->AttachFrame(ackFrame);
         }
 
@@ -89,6 +90,11 @@ class Connection {
     std::shared_ptr<payload::Packet> getUnAckedPacket(uint64_t packetNumber)
     {
         return this->unAckedPackets[packetNumber];
+    }
+
+    std::map<uint64_t,std::shared_ptr<payload::Packet>>& getUnAckedPackets()
+    {
+        return this->unAckedPackets;
     }
 
     int64_t getLargestAcked() {
