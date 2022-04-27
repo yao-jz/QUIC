@@ -65,31 +65,6 @@ std::list<std::shared_ptr<payload::Packet>> QUIC::getPackets(std::shared_ptr<thq
         }
     }
 
-<<<<<<< HEAD
-    // 不再接受重传之前的包的ack
-    for(auto packetnum : packetNumsDel)
-    {
-        connection->removeFromUnAckedPackets(packetnum);
-    }
-
-    // 判断是否要发送ping
-    std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
-    // ping的间隔时间
-    if (std::chrono::duration_cast<std::chrono::milliseconds>(now - connection.second->last_ping).count() > 10) {
-        // 开始发送PING frame
-        utils::logger::info("sending PING FRAME...");
-        std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(ConnectionID(), this->pktnum++, connection.second->getLargestAcked());
-        std::shared_ptr<payload::PingFrame> ping_frame = std::make_shared<payload::PingFrame>();
-        std::shared_ptr<payload::Payload> ping_payload = std::make_shared<payload::Payload>();
-        ping_payload->AttachFrame(ping_frame);
-        sockaddr_in addrTo = connection.second->getAddrTo();
-        std::shared_ptr<payload::Packet> ping_packet = std::make_shared<payload::Packet>(header, ping_payload, addrTo);
-        connection.second->insertIntoPending(ping_packet);
-    }
-
-    // 有即将发送的包，顺带发送ack
-=======
->>>>>>> a9feb1a423a3f68d2231196f2435e8455c6682cf
     if(!pendingPackets.empty() && !this->ACKRanges.Empty())
     {
         std::shared_ptr<payload::Packet> packet = pendingPackets.front();
@@ -296,13 +271,16 @@ int QUICClient::incomingMsg(
                     case payload::FrameType::CONNECTION_CLOSE: {
                         utils::logger::warn("SERVER Frame Type::CONNECTION_CLOSE");
                         this->ConnectionCloseCallback(sequence, "", 0);
+                        break;
                     }
                     case payload::FrameType::ACK:{
                         std::shared_ptr<payload::ACKFrame> ackFrame = std::static_pointer_cast<payload::ACKFrame>(frame);
                         this->handleACKFrame(ackFrame, sequence);
+                        break;
                     }
                     case payload::FrameType::PING:{
                         ackEliciting = true;
+                        break;
                     }
                 }
             }
@@ -379,12 +357,15 @@ int QUICServer::incomingMsg(
                     case payload::FrameType::ACK: {
                         std::shared_ptr<payload::ACKFrame> ackFrame = std::static_pointer_cast<payload::ACKFrame>(frame);
                         this->handleACKFrame(ackFrame, sequence);
+                        break;
                     }
                     case payload::FrameType::CONNECTION_CLOSE: {
                         this->ConnectionCloseCallback(sequence, "", 0);
+                        break;
                     }
                     case payload::FrameType::PING: {
                         ackEliciting = true;
+                        break;
                     }
                 }
             }
