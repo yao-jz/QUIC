@@ -293,10 +293,16 @@ int QUICClient::incomingMsg(
                     case payload::FrameType::CONNECTION_CLOSE: {
                         utils::logger::warn("SERVER Frame Type::CONNECTION_CLOSE");
                         this->ConnectionCloseCallback(sequence, "", 0);
+                        break;
                     }
                     case payload::FrameType::ACK:{
                         std::shared_ptr<payload::ACKFrame> ackFrame = std::static_pointer_cast<payload::ACKFrame>(frame);
                         this->handleACKFrame(ackFrame, sequence);
+                        break;
+                    }
+                    case payload::FrameType::PING:{
+                        ackEliciting = true;
+                        break;
                     }
                 }
             }
@@ -373,9 +379,15 @@ int QUICServer::incomingMsg(
                     case payload::FrameType::ACK: {
                         std::shared_ptr<payload::ACKFrame> ackFrame = std::static_pointer_cast<payload::ACKFrame>(frame);
                         this->handleACKFrame(ackFrame, sequence);
+                        break;
                     }
                     case payload::FrameType::CONNECTION_CLOSE: {
                         this->ConnectionCloseCallback(sequence, "", 0);
+                        break;
+                    }
+                    case payload::FrameType::PING: {
+                        ackEliciting = true;
+                        break;
                     }
                 }
             }
