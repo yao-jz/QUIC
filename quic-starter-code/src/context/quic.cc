@@ -54,12 +54,13 @@ std::list<std::shared_ptr<payload::Packet>> QUIC::getPackets(std::shared_ptr<thq
         std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
         if(duration_cast<std::chrono::milliseconds>(now - packet_pair.second->GetSendTimestamp()).count() > 7500) {
             // ignore RETRY packet
-            std::shared_ptr<thquic::payload::Packet> unAckedPacket = packet_pair.second;
+            std::shared_ptr<payload::Packet> unAckedPacket = packet_pair.second;
+            std::shared_ptr<payload::PacketNumberMixin> mixin = std::static_pointer_cast<payload::PacketNumberMixin>(unAckedPacket->GetPktHeader());
             uint64_t full = this->pktnum++;
             // reencode the packet number (because the length field may be changed)
             utils::TruncatedPacketNumber truncated = utils::encodePacketNumber(full, connection->getLargestAcked());
-            unAckedPacket->GetPktHeader()->SetTruncatedPacketNumber(truncated.first, truncated.second);
-            unAckedPacket->GetPktHeader()->SetFullPacketNumber(full);
+            mixin->SetTruncatedPacketNumber(truncated.first, truncated.second);
+            mixin->SetFullPacketNumber(full);
             connection->insertIntoPending(unAckedPacket);
             packetNumsDel.push_back(packet_pair.first);
         }
@@ -284,14 +285,14 @@ int QUICClient::incomingMsg(
                 switch (frame->Type()) {
                     case payload::FrameType::STREAM: {
                         ackEliciting = true;
-                        utils::logger::warn("SERVER Frame Type::STREAM");
+                        utils::logger::info("SERVER Frame Type::STREAM");
                         std::shared_ptr<payload::StreamFrame> streamFrame = std::static_pointer_cast<payload::StreamFrame>(frame);
                         uint64_t streamID = streamFrame->StreamID();
                         this->streamDataReadyCallback(sequence, streamID, streamFrame->FetchBuffer(), streamFrame->GetLength(), streamFrame->FINFlag());
                         break;
                     }
                     case payload::FrameType::CONNECTION_CLOSE: {
-                        utils::logger::warn("SERVER Frame Type::CONNECTION_CLOSE");
+                        utils::logger::info("SERVER Frame Type::CONNECTION_CLOSE");
                         this->ConnectionCloseCallback(sequence, "", 0);
                         break;
                     }
@@ -304,6 +305,7 @@ int QUICClient::incomingMsg(
                         ackEliciting = true;
                         break;
                     }
+                    default: utils::logger::warn("UNKNOWN FRAME TYPE");
                 }
             }
             if (ackEliciting) {
@@ -314,6 +316,7 @@ int QUICClient::incomingMsg(
         case payload::PacketType::RETRY:
             utils::logger::warn("SERVER PacketType::RETRY");
             break;
+        default: utils::logger::warn("UNKNOWN PACKET TYPE");
     }
     return 0;
 }
@@ -389,6 +392,7 @@ int QUICServer::incomingMsg(
                         ackEliciting = true;
                         break;
                     }
+                    default: utils::logger::warn("UNKNOWN FRAME TYPE");
                 }
             }
             if (ackEliciting) {
@@ -405,6 +409,7 @@ int QUICServer::incomingMsg(
         case payload::PacketType::RETRY:
             utils::logger::warn("SERVER PacketType::RETRY");
             break;
+        default: utils::logger::warn("UNKNOWN PACKET TYPE");
     }
     return 0;
 }
