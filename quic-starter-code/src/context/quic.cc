@@ -45,20 +45,60 @@ int QUIC::SetConnectionCloseCallback(
 std::list<std::shared_ptr<payload::Packet>> QUIC::getPackets(std::shared_ptr<thquic::context::Connection> connection)
 {
     std::map<uint64_t,std::shared_ptr<payload::Packet>> unAckedPackets = connection->getUnAckedPackets();
+<<<<<<< HEAD
+    std::list<std::shared_ptr<payload::Packet>> pendingPackets = connection->GetPendingPackets();
+
     // 超时重传
+=======
+    // restransmisson when time's up
+>>>>>>> a9feb1a423a3f68d2231196f2435e8455c6682cf
     std::vector<uint64_t> packetNumsDel;
-    for(auto packet_pair : unAckedPackets)
-    {
+    for(auto packet_pair : unAckedPackets) {
         std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+<<<<<<< HEAD
         if(duration_cast<std::chrono::milliseconds>(now - packet_pair.second->GetSendTimestamp()).count() > 7500)
         {
-
-            this->pendingPackets.push_back(packet_pair.second);
+            pendingPackets.push_back(packet_pair.second);
+=======
+        if(duration_cast<std::chrono::milliseconds>(now - packet_pair.second->GetSendTimestamp()).count() > 7500) {
+            // ignore RETRY packet
+            std::shared_ptr<thquic::payload::Packet> unAckedPacket = packet_pair.second;
+            uint64_t full = this->pktnum++;
+            // reencode the packet number (because the length field may be changed)
+            utils::TruncatedPacketNumber truncated = utils::encodePacketNumber(full, connection->getLargestAcked());
+            unAckedPacket->GetPktHeader()->SetTruncatedPacketNumber(truncated.first, truncated.second);
+            unAckedPacket->GetPktHeader()->SetFullPacketNumber(full);
+            connection->insertIntoPending(unAckedPacket);
+>>>>>>> a9feb1a423a3f68d2231196f2435e8455c6682cf
             packetNumsDel.push_back(packet_pair.first);
         }
     }
 
+<<<<<<< HEAD
+    // 不再接受重传之前的包的ack
+    for(auto packetnum : packetNumsDel)
+    {
+        connection->removeFromUnAckedPackets(packetnum);
+    }
 
+    // 判断是否要发送ping
+    std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+    // ping的间隔时间
+    if (std::chrono::duration_cast<std::chrono::milliseconds>(now - connection.second->last_ping).count() > 10) {
+        // 开始发送PING frame
+        utils::logger::info("sending PING FRAME...");
+        std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(ConnectionID(), this->pktnum++, connection.second->getLargestAcked());
+        std::shared_ptr<payload::PingFrame> ping_frame = std::make_shared<payload::PingFrame>();
+        std::shared_ptr<payload::Payload> ping_payload = std::make_shared<payload::Payload>();
+        ping_payload->AttachFrame(ping_frame);
+        sockaddr_in addrTo = connection.second->getAddrTo();
+        std::shared_ptr<payload::Packet> ping_packet = std::make_shared<payload::Packet>(header, ping_payload, addrTo);
+        connection.second->insertIntoPending(ping_packet);
+    }
+
+    // 有即将发送的包，顺带发送ack
+=======
+>>>>>>> a9feb1a423a3f68d2231196f2435e8455c6682cf
     if(!pendingPackets.empty() && !this->ACKRanges.Empty())
     {
         std::shared_ptr<payload::Packet> packet = pendingPackets.front();
@@ -66,6 +106,32 @@ std::list<std::shared_ptr<payload::Packet>> QUIC::getPackets(std::shared_ptr<thq
         packetRecvTime.clear();
         packet->GetPktPayload()->AttachFrame(ackFrame);
     }
+
+    // 没有即将发送的包，但有ack要超时了, 发送纯ACK包
+    if(pendingPackets.empty())
+    {
+        bool flag = false;
+        for(auto pair : connection->packetRecvTime)
+        {
+            std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+            if(duration_cast<std::chrono::milliseconds>(now - pair.second).count() > 7500)// todo 最大 ack 回复延迟
+            {
+                flag = true;
+                break;
+            }
+        }
+        if(flag)
+        {
+            std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(this->SrcID2DstID[this->Sequence2ID[connection.first]], this->pktnum++, connection.second->getLargestAcked());
+            std::shared_ptr<payload::Payload> payload = std::make_shared<payload::Payload>();
+            std::shared_ptr<payload::ACKFrame> ackFrame = std::make_shared<payload::ACKFrame>(20, connection.second->getACKRanges());// todo ACKDelay?
+            connection.second->packetRecvTime.clear();
+            payload->AttachFrame(ackFrame);
+            std::shared_ptr<payload::Packet> packet = std::make_shared<payload::Packet>(header, payload, connection.second->getAddrTo());
+            pendingPackets.push_back(packet);
+        }
+    }
+    return pendingPackets;
 }
 
 int QUIC::SocketLoop() {
@@ -77,46 +143,7 @@ int QUIC::SocketLoop() {
             this->incomingMsg(std::move(datagram));
         }
         for (auto& connection : this->connections) {
-            // 判断是否要发送ping
-            std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
-            // ping的间隔时间
-            if (std::chrono::duration_cast<std::chrono::milliseconds>(now - connection.second->last_ping).count() > 10) {
-                // 开始发送PING frame
-                utils::logger::info("sending PING FRAME...");
-                std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(ConnectionID(), this->pktnum++, connection.second->getLargestAcked());
-                std::shared_ptr<payload::PingFrame> ping_frame = std::make_shared<payload::PingFrame>();
-                std::shared_ptr<payload::Payload> ping_payload = std::make_shared<payload::Payload>();
-                ping_payload->AttachFrame(ping_frame);
-                sockaddr_in addrTo = connection.second->getAddrTo();
-                std::shared_ptr<payload::Packet> ping_packet = std::make_shared<payload::Packet>(header, ping_payload, addrTo);
-                connection.second->insertIntoPending(ping_packet);
-            }
-            auto& pendingPackets = connection.second->GetPendingPackets();
-            // auto& pendingPackets = connection.second->getPackets();
-            // if(pendingPackets.empty())
-            // {
-            //     // 如果没有需要发送的包，但需要发送纯ACK包
-            //     bool flag = false;
-            //     for(auto pair : connection.second->packetRecvTime)
-            //     {
-            //         std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
-            //         if(duration_cast<std::chrono::milliseconds>(now - pair.second).count() > 7500)// todo 最大 ack 回复延迟
-            //         {
-            //             flag = true;
-            //             break;
-            //         }
-            //     }
-            //     if(flag)
-            //     {
-            //         std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(this->SrcID2DstID[this->Sequence2ID[connection.first]], this->pktnum++, connection.second->getLargestAcked());
-            //         std::shared_ptr<payload::Payload> payload = std::make_shared<payload::Payload>();
-            //         std::shared_ptr<payload::ACKFrame> ackFrame = std::make_shared<payload::ACKFrame>(20, connection.second->getACKRanges());// todo ACKDelay?
-            //         connection.second->packetRecvTime.clear();
-            //         payload->AttachFrame(ackFrame);
-            //         std::shared_ptr<payload::Packet> packet = std::make_shared<payload::Packet>(header, payload, connection.second->getAddrTo());
-            //         pendingPackets.push_back(packet);
-            //     }
-            // }
+            auto& pendingPackets = this->getPackets(connection.second);
             while (!pendingPackets.empty()) {
                 std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
                 utils::logger::info("SEND A PACKET, NUMBER = {}", pendingPackets.front()->GetPacketNumber());
@@ -152,7 +179,7 @@ uint64_t QUIC::CloseStream([[maybe_unused]] uint64_t sequence,
     utils::logger::info("CloseStream\n");
     auto this_connection = this->connections[sequence];
     std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(ConnectionID(), this->pktnum++, this_connection->getLargestAcked());
-    std::shared_ptr<payload::StreamFrame> stream_frame = std::make_shared<payload::StreamFrame>(streamID, nullptr, 0, 0, 0, true);
+    std::shared_ptr<payload::StreamFrame> stream_frame = std::make_shared<payload::StreamFrame>(streamID, nullptr, 0, this->streamID2Offset[streamID], 0, true);
     std::shared_ptr<payload::Payload> stream_payload = std::make_shared<payload::Payload>();
     stream_payload->AttachFrame(stream_frame);
     sockaddr_in addrTo = this_connection->getAddrTo();
@@ -272,8 +299,6 @@ int QUICClient::incomingMsg(
                         utils::logger::warn("SERVER Frame Type::STREAM");
                         std::shared_ptr<payload::StreamFrame> streamFrame = std::static_pointer_cast<payload::StreamFrame>(frame);
                         uint64_t streamID = streamFrame->StreamID();
-                        // if (this->stream_count[sequence] <= streamID)
-                        //     this->streamReadyCallback(sequence, streamID);
                         this->streamDataReadyCallback(sequence, streamID, streamFrame->FetchBuffer(), streamFrame->GetLength(), streamFrame->FINFlag());
                         break;
                     }
