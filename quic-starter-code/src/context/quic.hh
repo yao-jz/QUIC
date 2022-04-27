@@ -66,7 +66,7 @@ class QUIC {
     uint64_t connectionSequence;
     uint64_t stream_count[10000];
     std::map<uint64_t, uint64_t> streamID2Offset;
-    std::list<std::shared_ptr<payload::Packet>> getPackets(std::shared_ptr<thquic::context::Connection> connection);
+    std::list<std::shared_ptr<payload::Packet>>& getPackets(std::shared_ptr<thquic::context::Connection> connection);
     StreamDataReadyCallbackType streamDataReadyCallback;
     ConnectionCloseCallbackType ConnectionCloseCallback;
 };
