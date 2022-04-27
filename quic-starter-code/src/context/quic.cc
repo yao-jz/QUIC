@@ -52,6 +52,7 @@ std::list<std::shared_ptr<payload::Packet>> QUIC::getPackets(std::shared_ptr<thq
         std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
         if(duration_cast<std::chrono::milliseconds>(now - packet_pair.second->GetSendTimestamp()).count() > 7500)
         {
+
             this->pendingPackets.push_back(packet_pair.second);
             packetNumsDel.push_back(packet_pair.first);
         }
@@ -70,11 +71,26 @@ std::list<std::shared_ptr<payload::Packet>> QUIC::getPackets(std::shared_ptr<thq
 int QUIC::SocketLoop() {
     std::cout << "enter socket loop " << std::endl;
     for (;;) {
+
         auto datagram = this->socket.tryRecvMsg(10ms);
         if (datagram) {
             this->incomingMsg(std::move(datagram));
         }
         for (auto& connection : this->connections) {
+            // 判断是否要发送ping
+            std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+            // ping的间隔时间
+            if (std::chrono::duration_cast<std::chrono::milliseconds>(now - connection.second->last_ping).count() > 10) {
+                // 开始发送PING frame
+                utils::logger::info("sending PING FRAME...");
+                std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(ConnectionID(), this->pktnum++, connection.second->getLargestAcked());
+                std::shared_ptr<payload::PingFrame> ping_frame = std::make_shared<payload::PingFrame>();
+                std::shared_ptr<payload::Payload> ping_payload = std::make_shared<payload::Payload>();
+                ping_payload->AttachFrame(ping_frame);
+                sockaddr_in addrTo = connection.second->getAddrTo();
+                std::shared_ptr<payload::Packet> ping_packet = std::make_shared<payload::Packet>(header, ping_payload, addrTo);
+                connection.second->insertIntoPending(ping_packet);
+            }
             auto& pendingPackets = connection.second->GetPendingPackets();
             // auto& pendingPackets = connection.second->getPackets();
             // if(pendingPackets.empty())
@@ -397,6 +413,7 @@ uint64_t QUICClient::CreateConnection(
     std::shared_ptr<utils::UDPDatagram> initial_dg = QUIC::encodeDatagram(initial_packet);
     this->socket.sendMsg(initial_dg);
     this->connectionReadyCallback = callback;
+    connection->last_ping = std::chrono::steady_clock::now();
     return 0;
 }
 

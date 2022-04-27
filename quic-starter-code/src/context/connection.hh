@@ -114,6 +114,7 @@ class Connection {
     utils::IntervalSet ACKRanges;
     public:
     std::map<uint64_t, std::chrono::steady_clock::time_point> packetRecvTime;
+    std::chrono::steady_clock::time_point last_ping;
 };
 
 }  // namespace thquic::context

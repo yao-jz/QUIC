@@ -40,7 +40,10 @@ class PacketNumberMixin {
         : truncatedPacketNumber{std::nullopt}, fullPacketNumber{full} {}
     explicit PacketNumberMixin(uint64_t full, uint64_t largestACKed)
         : truncatedPacketNumber{utils::encodePacketNumber(full, largestACKed)},
-          fullPacketNumber{full} {}
+          fullPacketNumber{full} {
+            std::cout << full << std::endl;
+
+          }
     explicit PacketNumberMixin(uint32_t truncated, uint8_t length,
                                uint64_t largestReceived)
         : truncatedPacketNumber{{truncated, length}},
@@ -431,7 +434,6 @@ class Initial : public PacketNumberMixin, public LongHeader {
         std::copy(std::cbegin(this->token),
                   std::cbegin(this->token) + this->tokenLength, buf);
         utils::encodeVarInt(stream, this->length);
-
         this->EncodePacketNumber(stream);
         return 0;
     }
