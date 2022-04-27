@@ -54,42 +54,18 @@ std::list<std::shared_ptr<payload::Packet>> QUIC::getPackets(std::shared_ptr<thq
         std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
         if(duration_cast<std::chrono::milliseconds>(now - packet_pair.second->GetSendTimestamp()).count() > 7500) {
             // ignore RETRY packet
-            std::shared_ptr<thquic::payload::Packet> unAckedPacket = packet_pair.second;
+            std::shared_ptr<payload::Packet> unAckedPacket = packet_pair.second;
+            std::shared_ptr<payload::PacketNumberMixin> mixin = std::static_pointer_cast<payload::PacketNumberMixin>(unAckedPacket->GetPktHeader());
             uint64_t full = this->pktnum++;
             // reencode the packet number (because the length field may be changed)
             utils::TruncatedPacketNumber truncated = utils::encodePacketNumber(full, connection->getLargestAcked());
-            unAckedPacket->GetPktHeader()->SetTruncatedPacketNumber(truncated.first, truncated.second);
-            unAckedPacket->GetPktHeader()->SetFullPacketNumber(full);
+            mixin->SetTruncatedPacketNumber(truncated.first, truncated.second);
+            mixin->SetFullPacketNumber(full);
             connection->insertIntoPending(unAckedPacket);
             packetNumsDel.push_back(packet_pair.first);
         }
     }
 
-<<<<<<< HEAD
-    // 不再接受重传之前的包的ack
-    for(auto packetnum : packetNumsDel)
-    {
-        connection->removeFromUnAckedPackets(packetnum);
-    }
-
-    // 判断是否要发送ping
-    std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
-    // ping的间隔时间
-    if (std::chrono::duration_cast<std::chrono::milliseconds>(now - connection.second->last_ping).count() > 10) {
-        // 开始发送PING frame
-        utils::logger::info("sending PING FRAME...");
-        std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(ConnectionID(), this->pktnum++, connection.second->getLargestAcked());
-        std::shared_ptr<payload::PingFrame> ping_frame = std::make_shared<payload::PingFrame>();
-        std::shared_ptr<payload::Payload> ping_payload = std::make_shared<payload::Payload>();
-        ping_payload->AttachFrame(ping_frame);
-        sockaddr_in addrTo = connection.second->getAddrTo();
-        std::shared_ptr<payload::Packet> ping_packet = std::make_shared<payload::Packet>(header, ping_payload, addrTo);
-        connection.second->insertIntoPending(ping_packet);
-    }
-
-    // 有即将发送的包，顺带发送ack
-=======
->>>>>>> a9feb1a423a3f68d2231196f2435e8455c6682cf
     if(!pendingPackets.empty() && !this->ACKRanges.Empty())
     {
         std::shared_ptr<payload::Packet> packet = pendingPackets.front();
@@ -287,14 +263,14 @@ int QUICClient::incomingMsg(
                 switch (frame->Type()) {
                     case payload::FrameType::STREAM: {
                         ackEliciting = true;
-                        utils::logger::warn("SERVER Frame Type::STREAM");
+                        utils::logger::info("SERVER Frame Type::STREAM");
                         std::shared_ptr<payload::StreamFrame> streamFrame = std::static_pointer_cast<payload::StreamFrame>(frame);
                         uint64_t streamID = streamFrame->StreamID();
                         this->streamDataReadyCallback(sequence, streamID, streamFrame->FetchBuffer(), streamFrame->GetLength(), streamFrame->FINFlag());
                         break;
                     }
                     case payload::FrameType::CONNECTION_CLOSE: {
-                        utils::logger::warn("SERVER Frame Type::CONNECTION_CLOSE");
+                        utils::logger::info("SERVER Frame Type::CONNECTION_CLOSE");
                         this->ConnectionCloseCallback(sequence, "", 0);
                     }
                     case payload::FrameType::ACK:{
@@ -304,6 +280,7 @@ int QUICClient::incomingMsg(
                     case payload::FrameType::PING:{
                         ackEliciting = true;
                     }
+                    default: utils::logger::warn("UNKNOWN FRAME TYPE");
                 }
             }
             if (ackEliciting) {
@@ -314,6 +291,7 @@ int QUICClient::incomingMsg(
         case payload::PacketType::RETRY:
             utils::logger::warn("SERVER PacketType::RETRY");
             break;
+        default: utils::logger::warn("UNKNOWN PACKET TYPE");
     }
     return 0;
 }
@@ -386,6 +364,7 @@ int QUICServer::incomingMsg(
                     case payload::FrameType::PING: {
                         ackEliciting = true;
                     }
+                    default: utils::logger::warn("UNKNOWN FRAME TYPE");
                 }
             }
             if (ackEliciting) {
@@ -402,6 +381,7 @@ int QUICServer::incomingMsg(
         case payload::PacketType::RETRY:
             utils::logger::warn("SERVER PacketType::RETRY");
             break;
+        default: utils::logger::warn("UNKNOWN PACKET TYPE");
     }
     return 0;
 }
