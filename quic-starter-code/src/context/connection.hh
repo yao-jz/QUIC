@@ -66,8 +66,18 @@ class Connection {
         return this->ACKRanges;
     }
 
+    bool getIsAlive()
+    {
+        return this->alive;
+    }
+    void setAlive(bool flag)
+    {
+        this->alive = flag;
+    }
+
     
    private:
+    bool alive;
     std::list<std::shared_ptr<payload::Packet>> pendingPackets;
     std::map<uint64_t,std::shared_ptr<payload::Packet>> unAckedPackets; // packetnum to packet
     struct sockaddr_in addrTo;

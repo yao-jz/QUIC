@@ -25,6 +25,8 @@ int QUIC::CloseConnection([[maybe_unused]] uint64_t sequence,
                           [[maybe_unused]] uint64_t errorCode) {
     utils::logger::info("CloseConnection\n");
     auto this_connection = this->connections[sequence];
+    this_connection->setAlive(false);
+    this_connection->getUnAckedPackets().clear();
     std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(ConnectionID(), this->pktnum++, this_connection->getLargestAcked());
     std::shared_ptr<payload::ConnectionCloseAppFrame> close_frame = std::make_shared<payload::ConnectionCloseAppFrame>(errorCode,reason);
     std::shared_ptr<payload::Payload> close_payload = std::make_shared<payload::Payload>();
@@ -140,7 +142,7 @@ int QUIC::SocketLoop() {
                 pendingPackets.front()->MarkSendTimestamp(now);
                 auto newDatagram = QUIC::encodeDatagram(pendingPackets.front());
                 this->socket.sendMsg(newDatagram);
-                connection.second->insertIntoUnAckedPackets(pendingPackets.front()->GetPacketNumber(), pendingPackets.front());
+                if(connection.second->getIsAlive()) connection.second->insertIntoUnAckedPackets(pendingPackets.front()->GetPacketNumber(), pendingPackets.front());
                 pendingPackets.pop_front();
             }
         }
@@ -231,6 +233,7 @@ void QUIC::handleACKFrame(std::shared_ptr<payload::ACKFrame> ackFrame, uint64_t 
         for (uint64_t packetNumber = interval.Start(); packetNumber <= interval.End(); packetNumber++) {
             // change tracking interval
             std::shared_ptr<thquic::payload::Packet> packet = this->connections[sequence]->getUnAckedPacket(packetNumber);
+            if(packet == nullptr) continue;
             for (auto frame : packet->GetPktPayload()->GetFrames()) {
                 if(frame->Type() == payload::FrameType::ACK) {
                     std::shared_ptr<payload::ACKFrame> subFrame = std::static_pointer_cast<payload::ACKFrame>(frame);
@@ -337,6 +340,7 @@ int QUICServer::incomingMsg(
             std::shared_ptr<Connection> connection = std::make_shared<Connection>();
             ConnectionID id = ConnectionIDGenerator::Get().Generate();
             connection->setAddrTo(datagram->GetAddrSrc());
+            connection->setAlive(true);
             uint64_t sequence = this->connectionSequence++;
             this->connections[sequence] = connection;
             this->Sequence2ID[sequence] = id; 
@@ -429,6 +433,7 @@ uint64_t QUICClient::CreateConnection(
     ConnectionID id = ConnectionIDGenerator::Get().Generate();
     std::shared_ptr<Connection> connection = std::make_shared<Connection>();
     connection->setAddrTo(addrTo);
+    connection->setAlive(true);
     uint64_t sequence = this->connectionSequence++;
     this->connections[sequence] = connection;
     this->ID2Sequence[id] = sequence;
