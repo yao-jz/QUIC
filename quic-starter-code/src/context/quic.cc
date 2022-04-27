@@ -47,7 +47,6 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
     std::map<uint64_t,std::shared_ptr<payload::Packet>>& unAckedPackets = connection->getUnAckedPackets();
     std::list<std::shared_ptr<payload::Packet>>& pendingPackets = connection->GetPendingPackets();
 
-    // 超时重传
     // restransmisson when time's up
     std::vector<uint64_t> packetNumsDel;
     for(auto packet_pair : unAckedPackets) {
@@ -56,6 +55,7 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
             // ignore RETRY packet
             std::shared_ptr<payload::Packet> unAckedPacket = packet_pair.second;
             std::shared_ptr<payload::PacketNumberMixin> mixin = std::dynamic_pointer_cast<payload::PacketNumberMixin>(unAckedPacket->GetPktHeader());
+            utils::logger::warn("PACKET LOST, NUMBER = {}", unAckedPacket->GetPacketNumber());
             uint64_t full = this->pktnum++;
             // reencode the packet number (because the length field may be changed)
             utils::TruncatedPacketNumber truncated = utils::encodePacketNumber(full, connection->getLargestAcked());
@@ -67,8 +67,7 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
     }
 
     // 不再接受重传之前的包的ack
-    for(auto packetnum : packetNumsDel)
-    {
+    for(auto packetnum : packetNumsDel) {
         connection->removeFromUnAckedPackets(packetnum);
     }
 
