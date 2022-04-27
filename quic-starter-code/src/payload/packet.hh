@@ -40,10 +40,7 @@ class PacketNumberMixin {
         : truncatedPacketNumber{std::nullopt}, fullPacketNumber{full} {}
     explicit PacketNumberMixin(uint64_t full, uint64_t largestACKed)
         : truncatedPacketNumber{utils::encodePacketNumber(full, largestACKed)},
-          fullPacketNumber{full} {
-            std::cout << full << std::endl;
-
-          }
+          fullPacketNumber{full} {}
     explicit PacketNumberMixin(uint32_t truncated, uint8_t length,
                                uint64_t largestReceived)
         : truncatedPacketNumber{{truncated, length}},
