@@ -55,7 +55,7 @@ std::list<std::shared_ptr<payload::Packet>> QUIC::getPackets(std::shared_ptr<thq
         if(duration_cast<std::chrono::milliseconds>(now - packet_pair.second->GetSendTimestamp()).count() > 7500) {
             // ignore RETRY packet
             std::shared_ptr<payload::Packet> unAckedPacket = packet_pair.second;
-            std::shared_ptr<payload::PacketNumberMixin> mixin = std::static_pointer_cast<payload::PacketNumberMixin>(unAckedPacket->GetPktHeader());
+            std::shared_ptr<payload::PacketNumberMixin> mixin = std::dynamic_pointer_cast<payload::PacketNumberMixin>(unAckedPacket->GetPktHeader());
             uint64_t full = this->pktnum++;
             // reencode the packet number (because the length field may be changed)
             utils::TruncatedPacketNumber truncated = utils::encodePacketNumber(full, connection->getLargestAcked());
