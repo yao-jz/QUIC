@@ -49,6 +49,15 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
     std::map<uint64_t,std::shared_ptr<payload::Packet>>& unAckedPackets = connection->getUnAckedPackets();
     std::list<std::shared_ptr<payload::Packet>>& pendingPackets = connection->GetPendingPackets();
 
+    if (connection->initial_complete) {
+        std::shared_ptr<payload::Initial> initial_header = std::make_shared<payload::Initial>(config::QUIC_VERSION, this->Sequence2ID[connection->sequence], ConnectionID(), this->pktnum++, connection->getLargestAcked());
+        std::shared_ptr<payload::Payload> initial_payload = std::make_shared<payload::Payload>();
+        std::shared_ptr<payload::Packet> initial_packet = std::make_shared<payload::Packet>(initial_header, initial_payload, connection->getAddrTo());
+        // std::shared_ptr<utils::UDPDatagram> initial_dg = QUIC::encodeDatagram(initial_packet);
+        connection->last_ping = std::chrono::steady_clock::now();
+        connection->insertIntoPending(initial_packet);
+    }
+
     // restransmisson when time's up
     std::vector<uint64_t> packetNumsDel;
     for(auto packet_pair : unAckedPackets) {
@@ -127,7 +136,6 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
 int QUIC::SocketLoop() {
     std::cout << "enter socket loop " << std::endl;
     for (;;) {
-
         auto datagram = this->socket.tryRecvMsg(10ms);
         if (datagram) {
             this->incomingMsg(std::move(datagram));
@@ -263,6 +271,7 @@ int QUICClient::incomingMsg(
             utils::logger::info("RECV A INITIAL PACKET FROM SERVER");
             this->connectionReadyCallback(this->ID2Sequence[header->GetDstID()]);
             this->SrcID2DstID[header->GetDstID()] = ih->GetSrcID();
+            this->connections[sequence]->initial_complete = true;
             break;
         }
         case payload::PacketType::ZERO_RTT:
@@ -434,6 +443,7 @@ uint64_t QUICClient::CreateConnection(
     connection->setAddrTo(addrTo);
     connection->setAlive(true);
     uint64_t sequence = this->connectionSequence++;
+    connection->sequence = sequence;
     this->connections[sequence] = connection;
     this->ID2Sequence[id] = sequence;
     this->Sequence2ID[sequence] = id;

@@ -87,6 +87,8 @@ class Connection {
     public:
     std::map<uint64_t, std::chrono::steady_clock::time_point> packetRecvTime;
     std::chrono::steady_clock::time_point last_ping;
+    bool initial_complete = false;
+    int sequence;
 };
 
 }  // namespace thquic::context
