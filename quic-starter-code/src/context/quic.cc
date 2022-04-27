@@ -45,18 +45,22 @@ int QUIC::SetConnectionCloseCallback(
 std::list<std::shared_ptr<payload::Packet>> QUIC::getPackets(std::shared_ptr<thquic::context::Connection> connection)
 {
     std::map<uint64_t,std::shared_ptr<payload::Packet>> unAckedPackets = connection->getUnAckedPackets();
-    // 超时重传
+    // restransmisson when time's up
     std::vector<uint64_t> packetNumsDel;
-    for(auto packet_pair : unAckedPackets)
-    {
+    for(auto packet_pair : unAckedPackets) {
         std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
-        if(duration_cast<std::chrono::milliseconds>(now - packet_pair.second->GetSendTimestamp()).count() > 7500)
-        {
-            this->pendingPackets.push_back(packet_pair.second);
+        if(duration_cast<std::chrono::milliseconds>(now - packet_pair.second->GetSendTimestamp()).count() > 7500) {
+            // ignore RETRY packet
+            std::shared_ptr<thquic::payload::Packet> unAckedPacket = packet_pair.second;
+            uint64_t full = this->pktnum++;
+            // reencode the packet number (because the length field may be changed)
+            utils::TruncatedPacketNumber truncated = utils::encodePacketNumber(full, connection->getLargestAcked());
+            unAckedPacket->GetPktHeader()->SetTruncatedPacketNumber(truncated.first, truncated.second);
+            unAckedPacket->GetPktHeader()->SetFullPacketNumber(full);
+            connection->insertIntoPending(unAckedPacket);
             packetNumsDel.push_back(packet_pair.first);
         }
     }
-
 
     if(!pendingPackets.empty() && !this->ACKRanges.Empty())
     {
