@@ -45,20 +45,36 @@ int QUIC::SetConnectionCloseCallback(
 std::list<std::shared_ptr<payload::Packet>> QUIC::getPackets(std::shared_ptr<thquic::context::Connection> connection)
 {
     std::map<uint64_t,std::shared_ptr<payload::Packet>> unAckedPackets = connection->getUnAckedPackets();
+<<<<<<< HEAD
     std::list<std::shared_ptr<payload::Packet>> pendingPackets = connection->GetPendingPackets();
 
     // 超时重传
+=======
+    // restransmisson when time's up
+>>>>>>> a9feb1a423a3f68d2231196f2435e8455c6682cf
     std::vector<uint64_t> packetNumsDel;
-    for(auto packet_pair : unAckedPackets)
-    {
+    for(auto packet_pair : unAckedPackets) {
         std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+<<<<<<< HEAD
         if(duration_cast<std::chrono::milliseconds>(now - packet_pair.second->GetSendTimestamp()).count() > 7500)
         {
             pendingPackets.push_back(packet_pair.second);
+=======
+        if(duration_cast<std::chrono::milliseconds>(now - packet_pair.second->GetSendTimestamp()).count() > 7500) {
+            // ignore RETRY packet
+            std::shared_ptr<thquic::payload::Packet> unAckedPacket = packet_pair.second;
+            uint64_t full = this->pktnum++;
+            // reencode the packet number (because the length field may be changed)
+            utils::TruncatedPacketNumber truncated = utils::encodePacketNumber(full, connection->getLargestAcked());
+            unAckedPacket->GetPktHeader()->SetTruncatedPacketNumber(truncated.first, truncated.second);
+            unAckedPacket->GetPktHeader()->SetFullPacketNumber(full);
+            connection->insertIntoPending(unAckedPacket);
+>>>>>>> a9feb1a423a3f68d2231196f2435e8455c6682cf
             packetNumsDel.push_back(packet_pair.first);
         }
     }
 
+<<<<<<< HEAD
     // 不再接受重传之前的包的ack
     for(auto packetnum : packetNumsDel)
     {
@@ -81,6 +97,8 @@ std::list<std::shared_ptr<payload::Packet>> QUIC::getPackets(std::shared_ptr<thq
     }
 
     // 有即将发送的包，顺带发送ack
+=======
+>>>>>>> a9feb1a423a3f68d2231196f2435e8455c6682cf
     if(!pendingPackets.empty() && !this->ACKRanges.Empty())
     {
         std::shared_ptr<payload::Packet> packet = pendingPackets.front();
