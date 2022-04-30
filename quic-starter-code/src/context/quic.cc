@@ -33,7 +33,10 @@ int QUIC::CloseConnection([[maybe_unused]] uint64_t sequence,
     close_payload->AttachFrame(close_frame);
     sockaddr_in addrTo = this_connection->getAddrTo();
     std::shared_ptr<payload::Packet> close_packet = std::make_shared<payload::Packet>(header, close_payload, addrTo);
-    this_connection->insertIntoPending(close_packet);
+    std::shared_ptr<utils::UDPDatagram> close_dg = QUIC::encodeDatagram(close_packet);
+    this->socket.sendMsg(close_dg);
+
+    // this_connection->insertIntoPending(close_packet);
     return 0;
 }
 
@@ -54,7 +57,7 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
         std::shared_ptr<payload::Initial> initial_header = std::make_shared<payload::Initial>(config::QUIC_VERSION, this->Sequence2ID[connection->sequence], ConnectionID(), this->pktnum++, connection->getLargestAcked());
         std::shared_ptr<payload::Payload> initial_payload = std::make_shared<payload::Payload>();
         std::shared_ptr<payload::Packet> initial_packet = std::make_shared<payload::Packet>(initial_header, initial_payload, connection->getAddrTo());
-        connection->last_ping = std::chrono::steady_clock::now();
+        // connection->last_ping = std::chrono::steady_clock::now();
         connection->last_initial = std::chrono::steady_clock::now();
         connection->insertIntoPending(initial_packet);
     }
@@ -93,19 +96,20 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
     }
 
     // // 判断是否要发送ping
-    // std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+    now = std::chrono::steady_clock::now();
     // // ping的间隔时间
-    // if (std::chrono::duration_cast<std::chrono::milliseconds>(now - connection->last_ping).count() > 10) {
-    //     // 开始发送PING frame
-    //     utils::logger::info("sending PING FRAME...");
-    //     std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(ConnectionID(), this->pktnum++, connection->getLargestAcked());
-    //     std::shared_ptr<payload::PingFrame> ping_frame = std::make_shared<payload::PingFrame>();
-    //     std::shared_ptr<payload::Payload> ping_payload = std::make_shared<payload::Payload>();
-    //     ping_payload->AttachFrame(ping_frame);
-    //     sockaddr_in addrTo = connection->getAddrTo();
-    //     std::shared_ptr<payload::Packet> ping_packet = std::make_shared<payload::Packet>(header, ping_payload, addrTo);
-    //     connection->insertIntoPending(ping_packet);
-    // }
+    if (std::chrono::duration_cast<std::chrono::milliseconds>(now - connection->last_ping).count() > 1000) {
+        // 开始发送PING frame
+        utils::logger::info("sending PING FRAME...");
+        std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(ConnectionID(), this->pktnum++, connection->getLargestAcked());
+        std::shared_ptr<payload::PingFrame> ping_frame = std::make_shared<payload::PingFrame>();
+        std::shared_ptr<payload::Payload> ping_payload = std::make_shared<payload::Payload>();
+        ping_payload->AttachFrame(ping_frame);
+        sockaddr_in addrTo = connection->getAddrTo();
+        std::shared_ptr<payload::Packet> ping_packet = std::make_shared<payload::Packet>(header, ping_payload, addrTo);
+        connection->last_ping = now;
+        connection->insertIntoPending(ping_packet);
+    }
 
     // 有即将发送的包，顺带发送ack
     if(!pendingPackets.empty() && !connection->getACKRanges().Empty())
@@ -151,6 +155,7 @@ int QUIC::SocketLoop() {
             this->incomingMsg(std::move(datagram));
         }
         for (auto& connection : this->connections) {
+            if (!connection.second->getIsAlive()) continue;
             auto& pendingPackets = this->getPackets(connection.second);
             // auto& pendingPackets = connection.second->GetPendingPackets();
             while (!pendingPackets.empty()) {
@@ -280,6 +285,17 @@ int QUICClient::incomingMsg(
     uint64_t sequence = this->ID2Sequence[header->GetDstID()];
     payload::PacketType packetType = header->Type();
 
+    std::shared_ptr<Connection> connection;
+    if (!(this->connections.find(sequence) == this->connections.end())) {
+        connection = this->connections.find(sequence)->second;
+        // if (!connection->getIsAlive()) {
+        //     utils::logger::warn("CONNECTION {} ALREADY CLOSED!", sequence);
+        //     this->CloseConnection(sequence, "", 0);
+        //     this->ConnectionCloseCallback(sequence, "", 0);
+        //     return 0;
+        // }
+    }
+
     switch (packetType) {
         case payload::PacketType::INITIAL: {
             std::shared_ptr<payload::Initial> ih = std::static_pointer_cast<payload::Initial>(header);
@@ -298,7 +314,7 @@ int QUICClient::incomingMsg(
             break;
         case payload::PacketType::ONE_RTT: {
             std::shared_ptr<payload::ShortHeader> sh = std::static_pointer_cast<payload::ShortHeader>(header);
-            sh->RestoreFullPacketNumber(this->connections[sequence]->getLargestAcked());
+            sh->RestoreFullPacketNumber(connection->getLargestAcked());
             uint64_t recvPacketNumber = sh->GetPacketNumber();
             utils::logger::info("RECV A PACKET FROM SERVER, PACKET NUMBER: {}", recvPacketNumber);
             uint64_t sequence = this->ID2Sequence[header->GetDstID()];
@@ -311,12 +327,12 @@ int QUICClient::incomingMsg(
                         utils::logger::info("SERVER Frame Type::STREAM");
                         std::shared_ptr<payload::StreamFrame> streamFrame = std::static_pointer_cast<payload::StreamFrame>(frame);
                         uint64_t streamID = streamFrame->StreamID();
-                        if (this->connections[sequence]->aliveStreams.find(streamID) == this->connections[sequence]->aliveStreams.end()) {
+                        if (connection->aliveStreams.find(streamID) == connection->aliveStreams.end()) {
                             utils::logger::warn("RECV A FRAME FROM CLOSED STREAM : {}", streamID);
                             continue;
                         }
                         else if (streamFrame->FINFlag()) {
-                            this->connections[sequence]->aliveStreams.erase(streamID);
+                            connection->aliveStreams.erase(streamID);
                         }
                         if(streamFrame->GetLength() != 0)
                         {
@@ -328,29 +344,43 @@ int QUICClient::incomingMsg(
                                 this->connections[sequence]->chunkStream.Consume(len, buffer);
                                 this->streamDataReadyCallback(sequence, streamID, std::move(buffer), len, streamFrame->FINFlag());
                             }
+                        if (!this->connections[sequence]->getIsAlive()) {
+                            this->CloseConnection(sequence, "", 0);
+                            utils::logger::warn("CONNECTION {} ALREADY CLOSED!", sequence);
                         }
                         break;
                     }
                     case payload::FrameType::CONNECTION_CLOSE: {
                         utils::logger::info("SERVER Frame Type::CONNECTION_CLOSE");
-                        this->ConnectionCloseCallback(sequence, "", 0);
+                        if (this->connections[sequence]->getIsAlive()){
+                            this->CloseConnection(sequence, "", 0);
+                            this->ConnectionCloseCallback(sequence, "", 0);
+                        }
                         break;
                     }
                     case payload::FrameType::ACK:{
                         std::shared_ptr<payload::ACKFrame> ackFrame = std::static_pointer_cast<payload::ACKFrame>(frame);
                         this->handleACKFrame(ackFrame, sequence);
+                        if (!this->connections[sequence]->getIsAlive()) {
+                            this->CloseConnection(sequence, "", 0);
+                            utils::logger::warn("CONNECTION {} ALREADY CLOSED!", sequence);
+                        }
                         break;
                     }
                     case payload::FrameType::PING:{
                         utils::logger::info("SERVER Frame Type::PING");
                         ackEliciting = true;
+                        if (!this->connections[sequence]->getIsAlive()) {
+                            this->CloseConnection(sequence, "", 0);
+                            utils::logger::warn("CONNECTION {} ALREADY CLOSED!", sequence);
+                        }
                         break;
                     }
                     default: utils::logger::warn("UNKNOWN FRAME TYPE");
                 }
             }
             if (ackEliciting) {
-                this->connections[sequence]->getACKRanges().AddInterval(recvPacketNumber, recvPacketNumber);
+                connection->getACKRanges().AddInterval(recvPacketNumber, recvPacketNumber);
             }
             break;
         }
@@ -370,8 +400,19 @@ int QUICServer::incomingMsg(
     utils::ByteStream stream = utils::ByteStream(datagram->FetchBuffer(), bufferLen);
     std::shared_ptr<payload::Header> header = payload::Header::Parse(stream);
     uint64_t sequence = this->ID2Sequence[header->GetDstID()];
-    payload::PacketType packetType = header->Type();
 
+    std::shared_ptr<Connection> connection;
+    if (!(this->connections.find(sequence) == this->connections.end())) {
+        connection = this->connections.find(sequence)->second;
+        // if (!connection->getIsAlive()) {
+        //     this->ConnectionCloseCallback(sequence, "", 0);
+        //     utils::logger::warn("CONNECTION {} ALREADY CLOSED!", sequence);
+        //     this->CloseConnection(sequence, "", 0);
+        //     return 0;
+        // }
+    }
+    
+    payload::PacketType packetType = header->Type();
     std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
 
     switch (packetType) {
@@ -421,7 +462,7 @@ int QUICServer::incomingMsg(
         }
         case payload::PacketType::ONE_RTT: {
             std::shared_ptr<payload::ShortHeader> sh = std::static_pointer_cast<payload::ShortHeader>(header);
-            sh->RestoreFullPacketNumber(this->connections[sequence]->getLargestAcked());
+            sh->RestoreFullPacketNumber(connection->getLargestAcked());
             uint64_t recvPacketNumber = sh->GetPacketNumber();
             utils::logger::info("RECV A PACKET FROM CLIENT, PACKET NUMBER: {}", recvPacketNumber);
             std::list<std::shared_ptr<payload::Frame>> frames = payload::Payload(stream, bufferLen - stream.Pos()).GetFrames();
@@ -440,12 +481,12 @@ int QUICServer::incomingMsg(
                             stream_count[sequence] = streamID + 1;
                             streamID2Offset[streamID] = 0;
                         }
-                        else if (this->connections[sequence]->aliveStreams.find(streamID) == this->connections[sequence]->aliveStreams.end()) {
+                        else if (connection->aliveStreams.find(streamID) == connection->aliveStreams.end()) {
                             utils::logger::warn("RECV A FRAME FROM CLOSED STREAM : {}", streamID);
                             continue;
                         }
                         else if (streamFrame->FINFlag()) {
-                            this->connections[sequence]->aliveStreams.erase(streamID);
+                            connection->aliveStreams.erase(streamID);
                         }
                         if(streamFrame->GetLength() != 0)
                         {
@@ -457,6 +498,9 @@ int QUICServer::incomingMsg(
                                 this->connections[sequence]->chunkStream.Consume(len, buffer);
                                 this->streamDataReadyCallback(sequence, streamID, std::move(buffer), len, streamFrame->FINFlag());
                             }
+                        if (!this->connections[sequence]->getIsAlive()) {
+                            this->CloseConnection(sequence, "", 0);
+                            utils::logger::warn("CONNECTION {} ALREADY CLOSED!", sequence);
                         }
                         break;
                     }
@@ -464,23 +508,34 @@ int QUICServer::incomingMsg(
                         utils::logger::info("CLIENT Frame Type::ACK");
                         std::shared_ptr<payload::ACKFrame> ackFrame = std::static_pointer_cast<payload::ACKFrame>(frame);
                         this->handleACKFrame(ackFrame, sequence);
+                        if (!this->connections[sequence]->getIsAlive()) {
+                            this->CloseConnection(sequence, "", 0);
+                            utils::logger::warn("CONNECTION {} ALREADY CLOSED!", sequence);
+                        }
                         break;
                     }
                     case payload::FrameType::CONNECTION_CLOSE: {
                         utils::logger::info("CLIENT Frame Type::CONNECTION_CLOSE");
-                        this->ConnectionCloseCallback(sequence, "", 0);
+                        if (this->connections[sequence]->getIsAlive()){
+                            this->CloseConnection(sequence, "", 0);
+                            this->ConnectionCloseCallback(sequence, "", 0);
+                        }
                         break;
                     }
                     case payload::FrameType::PING: {
                         utils::logger::info("CLIENT Frame Type::PING");
                         ackEliciting = true;
+                        if (!this->connections[sequence]->getIsAlive()) {
+                            this->CloseConnection(sequence, "", 0);
+                            utils::logger::warn("CONNECTION {} ALREADY CLOSED!", sequence);
+                        }
                         break;
                     }
                     default: utils::logger::warn("UNKNOWN FRAME TYPE");
                 }
             }
             if (ackEliciting) {
-                this->connections[sequence]->getACKRanges().AddInterval(recvPacketNumber, recvPacketNumber);
+                connection->getACKRanges().AddInterval(recvPacketNumber, recvPacketNumber);
             }
             break;
         }
