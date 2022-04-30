@@ -216,6 +216,12 @@ class Payload : public Serialization {
         return 0;
     }
 
+    int DeleteFrame(std::list<std::shared_ptr<thquic::payload::Frame>>::iterator position)
+    {
+        frames.erase(position);
+        return 0;
+    }
+
     bool IsACKEliciting() const {
         return std::find_if(
                    frames.cbegin(), frames.cend(),
