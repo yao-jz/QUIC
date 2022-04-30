@@ -48,13 +48,14 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
 {
     std::map<uint64_t,std::shared_ptr<payload::Packet>>& unAckedPackets = connection->getUnAckedPackets();
     std::list<std::shared_ptr<payload::Packet>>& pendingPackets = connection->GetPendingPackets();
+    std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
 
-    if (!connection->initial_complete) {
+    if (!connection->initial_complete && std::chrono::duration_cast<std::chrono::milliseconds>(now-connection->last_initial).count() > 1000) {
         std::shared_ptr<payload::Initial> initial_header = std::make_shared<payload::Initial>(config::QUIC_VERSION, this->Sequence2ID[connection->sequence], ConnectionID(), this->pktnum++, connection->getLargestAcked());
         std::shared_ptr<payload::Payload> initial_payload = std::make_shared<payload::Payload>();
         std::shared_ptr<payload::Packet> initial_packet = std::make_shared<payload::Packet>(initial_header, initial_payload, connection->getAddrTo());
-        // std::shared_ptr<utils::UDPDatagram> initial_dg = QUIC::encodeDatagram(initial_packet);
         connection->last_ping = std::chrono::steady_clock::now();
+        connection->last_initial = std::chrono::steady_clock::now();
         connection->insertIntoPending(initial_packet);
     }
 
@@ -62,7 +63,7 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
     std::vector<uint64_t> packetNumsDel;
     for(auto packet_pair : unAckedPackets) {
         std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
-        if(duration_cast<std::chrono::milliseconds>(now - packet_pair.second->GetSendTimestamp()).count() > 7500) {
+        if(std::chrono::duration_cast<std::chrono::milliseconds>(now - packet_pair.second->GetSendTimestamp()).count() > 7500) {
             // ignore RETRY packet
             std::shared_ptr<payload::Packet> unAckedPacket = packet_pair.second;
             std::shared_ptr<payload::PacketNumberMixin> mixin = std::dynamic_pointer_cast<payload::PacketNumberMixin>(unAckedPacket->GetPktHeader());
@@ -238,24 +239,27 @@ std::shared_ptr<utils::UDPDatagram> QUIC::encodeDatagram(
 
 
 void QUIC::handleACKFrame(std::shared_ptr<payload::ACKFrame> ackFrame, uint64_t sequence) {
+    std::shared_ptr<thquic::context::Connection> connection = this->connections[sequence];
     std::list<utils::Interval> ackedIntervals = ackFrame->GetACKRanges().Intervals();
     for (utils::Interval interval : ackedIntervals) {
         utils::logger::warn("ACKED PACKETS: START = {}, END = {}", interval.Start(), interval.End());
         for (uint64_t packetNumber = interval.Start(); packetNumber <= interval.End(); packetNumber++) {
             // change tracking interval
-            std::shared_ptr<thquic::payload::Packet> packet = this->connections[sequence]->getUnAckedPacket(packetNumber);
+            std::shared_ptr<thquic::payload::Packet> packet = connection->getUnAckedPacket(packetNumber);
             if(packet == nullptr) continue;
             for (auto frame : packet->GetPktPayload()->GetFrames()) {
                 if(frame->Type() == payload::FrameType::ACK) {
                     std::shared_ptr<payload::ACKFrame> subFrame = std::static_pointer_cast<payload::ACKFrame>(frame);
                     uint64_t largestAcked = subFrame->GetLargestACKed();
-                    this->connections[sequence]->getACKRanges().RemoveInterval(0, largestAcked);
+                    connection->getACKRanges().RemoveInterval(0, largestAcked);
                 }
             }
             // remove acked packets
-            this->connections[sequence]->removeFromUnAckedPackets(packetNumber);
+            connection->removeFromUnAckedPackets(packetNumber);
         }
     }
+    uint64_t newLargetstAcked = ackFrame->GetLargestACKed();
+    if (newLargetstAcked > connection->getLargestAcked()) connection->setLargestAcked(newLargetstAcked);
 }
 
 
@@ -478,6 +482,7 @@ uint64_t QUICClient::CreateConnection(
     this->socket.sendMsg(initial_dg);
     this->connectionReadyCallback = callback;
     connection->last_ping = std::chrono::steady_clock::now();
+    connection->last_initial = std::chrono::steady_clock::now();
     return 0;
 }
 

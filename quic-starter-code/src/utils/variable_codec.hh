@@ -25,7 +25,7 @@ inline TruncatedPacketNumber encodePacketNumber(uint64_t packetNumber,
         largestAcked != std::numeric_limits<decltype(largestAcked)>::max()
             ? packetNumber - largestAcked
             : packetNumber + 1;
-    size_t numberOfBits = DIGITS - std::countl_zero(numberOfUnACKed);
+    size_t numberOfBits = DIGITS - std::countl_zero(numberOfUnACKed) + 1;
 
     if (numberOfBits > 32) {
         throw std::invalid_argument(
