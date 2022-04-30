@@ -177,6 +177,7 @@ uint64_t QUIC::CreateStream([[maybe_unused]] uint64_t sequence,
         id = (this->stream_count[sequence]++) << 2;
     }
     streamID2Offset[id] = 0;
+    this->connections[sequence]->aliveStreams.emplace(id);
     return id;    
 }
 
@@ -310,7 +311,8 @@ int QUICClient::incomingMsg(
                         utils::logger::info("SERVER Frame Type::STREAM");
                         std::shared_ptr<payload::StreamFrame> streamFrame = std::static_pointer_cast<payload::StreamFrame>(frame);
                         uint64_t streamID = streamFrame->StreamID();
-                        if (this->connections[sequence]->aliveStreams.find(streamID) == this->connections[sequence]->aliveStreams.end) {
+
+                        if (this->connections[sequence]->aliveStreams.find(streamID) == this->connections[sequence]->aliveStreams.end()) {
                             utils::logger::warn("RECV A FRAME FROM CLOSED STREAM : {}", streamID);
                             continue;
                         }
@@ -421,10 +423,11 @@ int QUICServer::incomingMsg(
                         uint64_t streamID = streamFrame->StreamID();
                         if (this->stream_count[sequence] <= streamID) {
                             this->streamReadyCallback(sequence, streamID);
+                            this->connections[sequence]->aliveStreams.emplace(streamID);
                             stream_count[sequence] = streamID + 1;
                             streamID2Offset[streamID] = 0;
                         }
-                        if (this->connections[sequence]->aliveStreams.find(streamID) == this->connections[sequence]->aliveStreams.end) {
+                        if (this->connections[sequence]->aliveStreams.find(streamID) == this->connections[sequence]->aliveStreams.end()) {
                             utils::logger::warn("RECV A FRAME FROM CLOSED STREAM : {}", streamID);
                             continue;
                         }
