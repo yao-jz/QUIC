@@ -87,6 +87,7 @@ class Connection {
     public:
     std::map<uint64_t, std::chrono::steady_clock::time_point> packetRecvTime;
     std::chrono::steady_clock::time_point last_ping;
+    std::chrono::steady_clock::time_point last_initial;
     bool initial_complete = false;
     int sequence;
 };

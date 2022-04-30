@@ -48,12 +48,14 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
 {
     std::map<uint64_t,std::shared_ptr<payload::Packet>>& unAckedPackets = connection->getUnAckedPackets();
     std::list<std::shared_ptr<payload::Packet>>& pendingPackets = connection->GetPendingPackets();
+    std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
 
-    if (!connection->initial_complete) {
+    if (!connection->initial_complete && std::chrono::duration_cast<std::chrono::milliseconds>(now-connection->last_initial).count() > 1000) {
         std::shared_ptr<payload::Initial> initial_header = std::make_shared<payload::Initial>(config::QUIC_VERSION, this->Sequence2ID[connection->sequence], ConnectionID(), this->pktnum++, connection->getLargestAcked());
         std::shared_ptr<payload::Payload> initial_payload = std::make_shared<payload::Payload>();
         std::shared_ptr<payload::Packet> initial_packet = std::make_shared<payload::Packet>(initial_header, initial_payload, connection->getAddrTo());
         connection->last_ping = std::chrono::steady_clock::now();
+        connection->last_initial = std::chrono::steady_clock::now();
         connection->insertIntoPending(initial_packet);
     }
 
@@ -61,7 +63,7 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
     std::vector<uint64_t> packetNumsDel;
     for(auto packet_pair : unAckedPackets) {
         std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
-        if(duration_cast<std::chrono::milliseconds>(now - packet_pair.second->GetSendTimestamp()).count() > 7500) {
+        if(std::chrono::duration_cast<std::chrono::milliseconds>(now - packet_pair.second->GetSendTimestamp()).count() > 7500) {
             // ignore RETRY packet
             std::shared_ptr<payload::Packet> unAckedPacket = packet_pair.second;
             std::shared_ptr<payload::PacketNumberMixin> mixin = std::dynamic_pointer_cast<payload::PacketNumberMixin>(unAckedPacket->GetPktHeader());
@@ -472,6 +474,7 @@ uint64_t QUICClient::CreateConnection(
     this->socket.sendMsg(initial_dg);
     this->connectionReadyCallback = callback;
     connection->last_ping = std::chrono::steady_clock::now();
+    connection->last_initial = std::chrono::steady_clock::now();
     return 0;
 }
 
