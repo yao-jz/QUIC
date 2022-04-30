@@ -4,6 +4,8 @@
 #include "payload/packet.hh"
 #include <map>
 
+#define K_INITIAL_RTT 333
+#define MAX_ACK_DELAY 20
 namespace thquic::context {
 
 class Connection {
@@ -90,6 +92,12 @@ private:
     uint64_t largestAcked;
     utils::IntervalSet ACKRanges;
 public:
+    // RTT estimation relative
+    uint64_t smoothed_rtt = K_INITIAL_RTT;
+    uint64_t first_rtt_sample = 0;
+    uint64_t latest_rtt = 0;
+    uint64_t min_rtt = 0;
+    uint64_t rttvar = K_INITIAL_RTT / 2;
     std::set<uint64_t> aliveStreams;
     std::map<uint64_t, std::chrono::steady_clock::time_point> packetRecvTime;
     std::chrono::steady_clock::time_point last_ping;

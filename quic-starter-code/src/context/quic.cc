@@ -4,7 +4,6 @@
 #include <ratio>
 #include <chrono>
 #include "quic.hh"
-
 namespace thquic::context {
 
 thquic::context::QUIC::QUIC(thquic::context::PeerType type) : type(type), connectionSequence(0) {
@@ -100,7 +99,9 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
     if(!pendingPackets.empty() && !connection->getACKRanges().Empty())
     {
         std::shared_ptr<payload::Packet> packet = pendingPackets.front();
-        std::shared_ptr<payload::ACKFrame> ackFrame = std::make_shared<payload::ACKFrame>(20, connection->getACKRanges());// todo ACKDelay?
+        uint64_t pktNumber = connection->getACKRanges().GetEnd();
+        uint64_t delay = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - connection->packetRecvTime.find(pktNumber)->second).count();
+        std::shared_ptr<payload::ACKFrame> ackFrame = std::make_shared<payload::ACKFrame>(delay, connection->getACKRanges());
         connection->packetRecvTime.clear();
         packet->GetPktPayload()->AttachFrame(ackFrame);
     }
@@ -234,6 +235,30 @@ std::shared_ptr<utils::UDPDatagram> QUIC::encodeDatagram(
 void QUIC::handleACKFrame(std::shared_ptr<payload::ACKFrame> ackFrame, uint64_t sequence) {
     std::shared_ptr<thquic::context::Connection> connection = this->connections[sequence];
     std::list<utils::Interval> ackedIntervals = ackFrame->GetACKRanges().Intervals();
+    uint64_t largestAcked = ackFrame->GetLargestACKed();
+    // updating RTT !
+    std::shared_ptr<payload::Packet> latestPacket = connection->getUnAckedPackets()[largestAcked];
+    if (largestAcked > connection->getLargestAcked() && latestPacket->IsACKEliciting()){
+        uint64_t ack_delay = ackFrame->GetACKDelay() > MAX_ACK_DELAY ? MAX_ACK_DELAY : ackFrame->GetACKDelay();
+        connection->latest_rtt = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - latestPacket->GetSendTimestamp()).count();
+        if (connection->first_rtt_sample == 0) {
+            connection->min_rtt = connection->latest_rtt;
+            connection->smoothed_rtt = connection->latest_rtt;
+            connection->rttvar = connection->latest_rtt / 2;
+            connection->
+            first_rtt_sample = 1;
+        }
+        connection->min_rtt = connection->min_rtt < connection->latest_rtt ? connection->min_rtt : connection->latest_rtt;
+        // TODO: Handshake
+        uint64_t adjusted_rtt = connection->latest_rtt;
+        if (connection->latest_rtt > connection->min_rtt + ack_delay){
+            adjusted_rtt = connection->latest_rtt - ack_delay;
+        }
+        int64_t diff = connection->smoothed_rtt - adjusted_rtt;
+        connection->rttvar = 3/4 * connection->rttvar + 1/4 * (diff >= 0 ? diff : -diff);
+        connection->smoothed_rtt = 7/8 * connection->smoothed_rtt + 1/8 * adjusted_rtt;
+    }
+    utils::logger::info("ESTIMATE RTT: {}", connection->smoothed_rtt);
     for (utils::Interval interval : ackedIntervals) {
         utils::logger::info("ACKED PACKETS: START = {}, END = {}", interval.Start(), interval.End());
         for (uint64_t packetNumber = interval.Start(); packetNumber <= interval.End(); packetNumber++) {
@@ -414,6 +439,7 @@ int QUICServer::incomingMsg(
             std::shared_ptr<payload::ShortHeader> sh = std::static_pointer_cast<payload::ShortHeader>(header);
             sh->RestoreFullPacketNumber(connection->getLargestAcked());
             uint64_t recvPacketNumber = sh->GetPacketNumber();
+            connection->packetRecvTime[recvPacketNumber] = now;
             utils::logger::info("RECV A PACKET FROM CLIENT, PACKET NUMBER: {}", recvPacketNumber);
             std::list<std::shared_ptr<payload::Frame>> frames = payload::Payload(stream, bufferLen - stream.Pos()).GetFrames();
             uint64_t sequence = this->ID2Sequence[header->GetDstID()];
