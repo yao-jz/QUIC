@@ -344,17 +344,36 @@ int QUICServer::incomingMsg(
             ih->RestoreFullPacketNumber(0);
             uint64_t recvPacketNumber = ih->GetPacketNumber();
             utils::logger::info("RECV A PACKET FROM CLIENT, PACKET NUMBER: {}", recvPacketNumber);
-            std::shared_ptr<Connection> connection = std::make_shared<Connection>();
-            ConnectionID id = ConnectionIDGenerator::Get().Generate();
-            connection->setAddrTo(datagram->GetAddrSrc());
-            connection->setAlive(true);
-            uint64_t sequence = this->connectionSequence++;
-            this->connections[sequence] = connection;
-            this->Sequence2ID[sequence] = id; 
-            this->ID2Sequence[id] = sequence;
-            this->SrcID2DstID[id] = ih->GetSrcID();
-            this->connections[sequence]->packetRecvTime[recvPacketNumber] = now;
-            std::shared_ptr<payload::Initial> initial_header = std::make_shared<payload::Initial>(config::QUIC_VERSION, id, this->SrcID2DstID[id], this->pktnum++, connection->getLargestAcked());
+            ConnectionID id;
+            uint64_t sequence;
+            bool flag = false;
+            for(auto pair : this->connections)
+            {
+                if((pair.second->getAddrTo().sin_addr.s_addr == datagram->GetAddrSrc().sin_addr.s_addr) 
+                    && (pair.second->getAddrTo().sin_port == datagram->GetAddrSrc().sin_port))
+                {
+                    sequence = pair.first;
+                    id = this->Sequence2ID[sequence];
+                    flag = true;
+                    pair.second->packetRecvTime[recvPacketNumber] = now;
+                    break;
+                }
+            }
+            if(!flag)
+            {
+                std::shared_ptr<Connection> connection = std::make_shared<Connection>();
+                ConnectionID id = ConnectionIDGenerator::Get().Generate();
+                connection->setAddrTo(datagram->GetAddrSrc());
+                connection->setAlive(true);
+                connection->initial_complete = true;
+                uint64_t sequence = this->connectionSequence++;
+                this->connections[sequence] = connection;
+                this->Sequence2ID[sequence] = id; 
+                this->ID2Sequence[id] = sequence;
+                this->SrcID2DstID[id] = ih->GetSrcID();
+                this->connections[sequence]->packetRecvTime[recvPacketNumber] = now;
+            }
+            std::shared_ptr<payload::Initial> initial_header = std::make_shared<payload::Initial>(config::QUIC_VERSION, id, this->SrcID2DstID[id], this->pktnum++, 0);
             std::shared_ptr<payload::Payload> initial_payload = std::make_shared<payload::Payload>();
             std::shared_ptr<payload::Packet> initial_packet = std::make_shared<payload::Packet>(initial_header, initial_payload, datagram->GetAddrSrc());
             std::shared_ptr<utils::UDPDatagram> initial_dg = QUIC::encodeDatagram(initial_packet);
