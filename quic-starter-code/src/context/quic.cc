@@ -287,6 +287,7 @@ int QUICClient::incomingMsg(
         connection = this->connections.find(sequence)->second;
         if (!connection->getIsAlive()) {
             utils::logger::warn("CONNECTION {} ALREADY CLOSED!", sequence);
+            this->ConnectionCloseCallback(sequence, "", 0);
             return 0;
         }
     }
@@ -376,6 +377,7 @@ int QUICServer::incomingMsg(
     if (!(this->connections.find(sequence) == this->connections.end())) {
         connection = this->connections.find(sequence)->second;
         if (!connection->getIsAlive()) {
+            this->ConnectionCloseCallback(sequence, "", 0);
             utils::logger::warn("CONNECTION {} ALREADY CLOSED!", sequence);
             return 0;
         }
