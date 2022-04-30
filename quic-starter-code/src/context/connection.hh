@@ -9,7 +9,7 @@ class Connection {
    public:
     Connection()
     {
-        this->largestAcked =0;
+        this->largestAcked = 0;
         this->ACKRanges = utils::IntervalSet();
     }
 
@@ -58,7 +58,11 @@ class Connection {
         return this->unAckedPackets;
     }
 
-    int64_t getLargestAcked() {
+    void setLargestAcked(uint64_t newAcked) {
+        this->largestAcked = newAcked;
+    }
+
+    uint64_t getLargestAcked() {
         return this->largestAcked;
     }
 
@@ -71,7 +75,7 @@ class Connection {
     std::list<std::shared_ptr<payload::Packet>> pendingPackets;
     std::map<uint64_t,std::shared_ptr<payload::Packet>> unAckedPackets; // packetnum to packet
     struct sockaddr_in addrTo;
-    int64_t largestAcked;
+    uint64_t largestAcked;
     utils::IntervalSet ACKRanges;
     public:
     std::map<uint64_t, std::chrono::steady_clock::time_point> packetRecvTime;
