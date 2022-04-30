@@ -208,14 +208,26 @@ uint64_t QUIC::SendData([[maybe_unused]] uint64_t sequence,
                         [[maybe_unused]] bool FIN) {
     utils::logger::info("sendData, streamID is {}, offset is {}", streamID, this->streamID2Offset[streamID]);
     auto this_connection = this->connections[sequence];
-    // thquic::ConnectionID connection_id = this->connections[sequence]
-    // while(len > 1370)
-    // {
-    //     std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(this->SrcID2DstID[this->Sequence2ID[sequence]], this->pktnum++, this_connection->getLargestAcked());
-
-    // }
+    uint8_t *buffer = buf.release();
+    while(len > MAX_SLICE_LENGTH)
+    {
+        std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(this->SrcID2DstID[this->Sequence2ID[sequence]], this->pktnum++, this_connection->getLargestAcked());
+        std::unique_ptr<uint8_t[]> tmp = std::make_unique<uint8_t[]>(MAX_SLICE_LENGTH);
+        std::copy(buffer, buffer + MAX_SLICE_LENGTH, tmp.get());
+        std::shared_ptr<payload::StreamFrame> stream_frame = std::make_shared<payload::StreamFrame>(streamID, std::move(tmp), MAX_SLICE_LENGTH, this->streamID2Offset[streamID], MAX_SLICE_LENGTH, FIN);
+        this->streamID2Offset[streamID] += MAX_SLICE_LENGTH;
+        buffer += MAX_SLICE_LENGTH;
+        len -= MAX_SLICE_LENGTH;
+        std::shared_ptr<payload::Payload> stream_payload = std::make_shared<payload::Payload>();
+        stream_payload->AttachFrame(stream_frame);
+        sockaddr_in addrTo = this->connections[sequence]->getAddrTo();
+        std::shared_ptr<payload::Packet> stream_packet = std::make_shared<payload::Packet>(header, stream_payload, addrTo);
+        this_connection->insertIntoPending(stream_packet);
+    }
     std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(this->SrcID2DstID[this->Sequence2ID[sequence]], this->pktnum++, this_connection->getLargestAcked());
-    std::shared_ptr<payload::StreamFrame> stream_frame = std::make_shared<payload::StreamFrame>(streamID, std::move(buf), len, this->streamID2Offset[streamID], len, FIN);
+    std::unique_ptr<uint8_t[]> tmp = std::make_unique<uint8_t[]>(len);
+    std::copy(buffer, buffer + len, tmp.get());
+    std::shared_ptr<payload::StreamFrame> stream_frame = std::make_shared<payload::StreamFrame>(streamID, std::move(tmp), len, this->streamID2Offset[streamID], len, FIN);
     this->streamID2Offset[streamID] += len;
     std::shared_ptr<payload::Payload> stream_payload = std::make_shared<payload::Payload>();
     stream_payload->AttachFrame(stream_frame);
