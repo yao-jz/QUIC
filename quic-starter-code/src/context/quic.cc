@@ -344,6 +344,7 @@ int QUICClient::incomingMsg(
                                 this->connections[sequence]->chunkStream.Consume(len, buffer);
                                 this->streamDataReadyCallback(sequence, streamID, std::move(buffer), len, streamFrame->FINFlag());
                             }
+                        }
                         if (!this->connections[sequence]->getIsAlive()) {
                             this->CloseConnection(sequence, "", 0);
                             utils::logger::warn("CONNECTION {} ALREADY CLOSED!", sequence);
@@ -498,6 +499,7 @@ int QUICServer::incomingMsg(
                                 this->connections[sequence]->chunkStream.Consume(len, buffer);
                                 this->streamDataReadyCallback(sequence, streamID, std::move(buffer), len, streamFrame->FINFlag());
                             }
+                        }
                         if (!this->connections[sequence]->getIsAlive()) {
                             this->CloseConnection(sequence, "", 0);
                             utils::logger::warn("CONNECTION {} ALREADY CLOSED!", sequence);
