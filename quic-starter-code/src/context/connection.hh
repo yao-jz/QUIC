@@ -2,6 +2,7 @@
 #define THQUIC_CONTEXT_CONNECTION_H
 
 #include "payload/packet.hh"
+#include <map>
 
 namespace thquic::context {
 
@@ -81,14 +82,15 @@ class Connection {
     }
 
     
-   private:
+private:
     bool alive;
     std::list<std::shared_ptr<payload::Packet>> pendingPackets;
     std::map<uint64_t,std::shared_ptr<payload::Packet>> unAckedPackets; // packetnum to packet
     struct sockaddr_in addrTo;
     uint64_t largestAcked;
     utils::IntervalSet ACKRanges;
-    public:
+public:
+    std::set<uint64_t> aliveStreams;
     std::map<uint64_t, std::chrono::steady_clock::time_point> packetRecvTime;
     std::chrono::steady_clock::time_point last_ping;
     std::chrono::steady_clock::time_point last_initial;
