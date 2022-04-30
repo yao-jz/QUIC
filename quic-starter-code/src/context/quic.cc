@@ -66,6 +66,15 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
         if(std::chrono::duration_cast<std::chrono::milliseconds>(now - packet_pair.second->GetSendTimestamp()).count() > 7500) {
             // ignore RETRY packet
             std::shared_ptr<payload::Packet> unAckedPacket = packet_pair.second;
+            auto frames = unAckedPacket->GetPktPayload()->GetFrames();
+            for(auto frame = frames.begin(); frame != frames.end() ; frame ++)
+            {
+                if((*frame)->Type() == payload::FrameType::ACK)
+                {
+                    unAckedPacket->GetPktPayload()->DeleteFrame(frame);
+                    break;
+                }
+            }
             std::shared_ptr<payload::PacketNumberMixin> mixin = std::dynamic_pointer_cast<payload::PacketNumberMixin>(unAckedPacket->GetPktHeader());
             utils::logger::warn("PACKET LOST, NUMBER = {}", unAckedPacket->GetPacketNumber());
             uint64_t full = this->pktnum++;
@@ -193,7 +202,7 @@ uint64_t QUIC::SendData([[maybe_unused]] uint64_t sequence,
                         [[maybe_unused]] std::unique_ptr<uint8_t[]> buf,
                         [[maybe_unused]] size_t len,
                         [[maybe_unused]] bool FIN) {
-    utils::logger::info("sendData, streamID is {}, offset is {}\n", streamID, this->streamID2Offset[streamID]);
+    utils::logger::info("sendData, streamID is {}, offset is {}", streamID, this->streamID2Offset[streamID]);
     auto this_connection = this->connections[sequence];
     // thquic::ConnectionID connection_id = this->connections[sequence]
     while(len > 1370)
