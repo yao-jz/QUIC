@@ -257,7 +257,8 @@ void QUIC::handleACKFrame(std::shared_ptr<payload::ACKFrame> ackFrame, uint64_t 
     std::list<utils::Interval> ackedIntervals = ackFrame->GetACKRanges().Intervals();
     uint64_t largestAcked = ackFrame->GetLargestACKed();
     // updating RTT !
-    std::shared_ptr<payload::Packet> latestPacket = connection->getUnAckedPackets()[largestAcked];
+    std::shared_ptr<payload::Packet> latestPacket = connection->getUnAckedPacket(largestAcked);
+    if (latestPacket == nullptr) return;
     if (largestAcked > connection->getLargestAcked() && latestPacket->IsACKEliciting()){
         uint64_t ack_delay = ackFrame->GetACKDelay() > MAX_ACK_DELAY ? MAX_ACK_DELAY : ackFrame->GetACKDelay();
         connection->latest_rtt = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - latestPacket->GetSendTimestamp()).count();
