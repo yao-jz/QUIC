@@ -140,6 +140,7 @@ int QUIC::SocketLoop() {
             this->incomingMsg(std::move(datagram));
         }
         for (auto& connection : this->connections) {
+            if (!connection.second->getIsAlive()) continue;
             auto& pendingPackets = this->getPackets(connection.second);
             // auto& pendingPackets = connection.second->GetPendingPackets();
             while (!pendingPackets.empty()) {
@@ -264,6 +265,15 @@ int QUICClient::incomingMsg(
     uint64_t sequence = this->ID2Sequence[header->GetDstID()];
     payload::PacketType packetType = header->Type();
 
+    std::shared_ptr<Connection> connection;
+    if (!(this->connections.find(sequence) == this->connections.end())) {
+        connection = this->connections.find(sequence)->second;
+        if (!connection->getIsAlive()) {
+            utils::logger::warn("CONNECTION {} ALREADY CLOSED!", sequence);
+            return 0;
+        }
+    }
+
     switch (packetType) {
         case payload::PacketType::INITIAL: {
             std::shared_ptr<payload::Initial> ih = std::static_pointer_cast<payload::Initial>(header);
@@ -282,7 +292,7 @@ int QUICClient::incomingMsg(
             break;
         case payload::PacketType::ONE_RTT: {
             std::shared_ptr<payload::ShortHeader> sh = std::static_pointer_cast<payload::ShortHeader>(header);
-            sh->RestoreFullPacketNumber(this->connections[sequence]->getLargestAcked());
+            sh->RestoreFullPacketNumber(connection->getLargestAcked());
             uint64_t recvPacketNumber = sh->GetPacketNumber();
             utils::logger::info("RECV A PACKET FROM SERVER, PACKET NUMBER: {}", recvPacketNumber);
             uint64_t sequence = this->ID2Sequence[header->GetDstID()];
@@ -295,12 +305,12 @@ int QUICClient::incomingMsg(
                         utils::logger::info("SERVER Frame Type::STREAM");
                         std::shared_ptr<payload::StreamFrame> streamFrame = std::static_pointer_cast<payload::StreamFrame>(frame);
                         uint64_t streamID = streamFrame->StreamID();
-                        if (this->connections[sequence]->aliveStreams.find(streamID) == this->connections[sequence]->aliveStreams.end()) {
+                        if (connection->aliveStreams.find(streamID) == connection->aliveStreams.end()) {
                             utils::logger::warn("RECV A FRAME FROM CLOSED STREAM : {}", streamID);
                             continue;
                         }
                         else if (streamFrame->FINFlag()) {
-                            this->connections[sequence]->aliveStreams.erase(streamID);
+                            connection->aliveStreams.erase(streamID);
                         }
                         this->streamDataReadyCallback(sequence, streamID, streamFrame->FetchBuffer(), streamFrame->GetLength(), streamFrame->FINFlag());
                         break;
@@ -324,7 +334,7 @@ int QUICClient::incomingMsg(
                 }
             }
             if (ackEliciting) {
-                this->connections[sequence]->getACKRanges().AddInterval(recvPacketNumber, recvPacketNumber);
+                connection->getACKRanges().AddInterval(recvPacketNumber, recvPacketNumber);
             }
             break;
         }
@@ -343,8 +353,17 @@ int QUICServer::incomingMsg(
     utils::ByteStream stream = utils::ByteStream(datagram->FetchBuffer(), bufferLen);
     std::shared_ptr<payload::Header> header = payload::Header::Parse(stream);
     uint64_t sequence = this->ID2Sequence[header->GetDstID()];
-    payload::PacketType packetType = header->Type();
 
+    std::shared_ptr<Connection> connection;
+    if (!(this->connections.find(sequence) == this->connections.end())) {
+        connection = this->connections.find(sequence)->second;
+        if (!connection->getIsAlive()) {
+            utils::logger::warn("CONNECTION {} ALREADY CLOSED!", sequence);
+            return 0;
+        }
+    }
+    
+    payload::PacketType packetType = header->Type();
     std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
 
     switch (packetType) {
@@ -393,7 +412,7 @@ int QUICServer::incomingMsg(
         }
         case payload::PacketType::ONE_RTT: {
             std::shared_ptr<payload::ShortHeader> sh = std::static_pointer_cast<payload::ShortHeader>(header);
-            sh->RestoreFullPacketNumber(this->connections[sequence]->getLargestAcked());
+            sh->RestoreFullPacketNumber(connection->getLargestAcked());
             uint64_t recvPacketNumber = sh->GetPacketNumber();
             utils::logger::info("RECV A PACKET FROM CLIENT, PACKET NUMBER: {}", recvPacketNumber);
             std::list<std::shared_ptr<payload::Frame>> frames = payload::Payload(stream, bufferLen - stream.Pos()).GetFrames();
@@ -411,12 +430,12 @@ int QUICServer::incomingMsg(
                             stream_count[sequence] = streamID + 1;
                             streamID2Offset[streamID] = 0;
                         }
-                        else if (this->connections[sequence]->aliveStreams.find(streamID) == this->connections[sequence]->aliveStreams.end()) {
+                        else if (connection->aliveStreams.find(streamID) == connection->aliveStreams.end()) {
                             utils::logger::warn("RECV A FRAME FROM CLOSED STREAM : {}", streamID);
                             continue;
                         }
                         else if (streamFrame->FINFlag()) {
-                            this->connections[sequence]->aliveStreams.erase(streamID);
+                            connection->aliveStreams.erase(streamID);
                         }
                         this->streamDataReadyCallback(sequence, streamID, streamFrame->FetchBuffer(), streamFrame->GetLength(), streamFrame->FINFlag());
                         break;
@@ -441,7 +460,7 @@ int QUICServer::incomingMsg(
                 }
             }
             if (ackEliciting) {
-                this->connections[sequence]->getACKRanges().AddInterval(recvPacketNumber, recvPacketNumber);
+                connection->getACKRanges().AddInterval(recvPacketNumber, recvPacketNumber);
             }
             break;
         }
