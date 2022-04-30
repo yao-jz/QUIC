@@ -217,9 +217,14 @@ class Payload : public Serialization {
         return 0;
     }
 
-    int DeleteFrame(std::list<std::shared_ptr<thquic::payload::Frame>>::iterator position)
+    int DeleteFrame(int position)
     {
-        frames.erase(position);
+        auto iter = frames.begin();
+        while(position --)
+        {
+            iter ++;
+        }
+        frames.erase(iter);
         return 0;
     }
 
@@ -707,7 +712,7 @@ class Packet : Serialization {
 
     std::shared_ptr<Payload> GetPktPayload() { return this->payload; }
 
-    void DeletePayloadFrame(std::list<std::shared_ptr<thquic::payload::Frame>>::iterator position)
+    void DeletePayloadFrame(int position)
     {
         this->payload->DeleteFrame(position);
     }

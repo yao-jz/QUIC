@@ -74,7 +74,7 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
             {
                 if((*frame)->Type() == payload::FrameType::ACK)
                 {
-                    unAckedPacket->DeletePayloadFrame(frame);
+                    unAckedPacket->DeletePayloadFrame(std::distance(frames.begin(), frame));
                     break;
                 }
             }
