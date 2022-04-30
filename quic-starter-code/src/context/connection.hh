@@ -12,6 +12,7 @@ class Connection {
     {
         this->largestAcked = 0;
         this->ACKRanges = utils::IntervalSet();
+        this->chunkStream = utils::ChunkStream();
     }
 
     std::list<std::shared_ptr<payload::Packet>>& GetPendingPackets() {
@@ -96,6 +97,7 @@ public:
     std::chrono::steady_clock::time_point last_initial;
     bool initial_complete = false;
     int sequence;
+    utils::ChunkStream chunkStream;
 };
 
 }  // namespace thquic::context

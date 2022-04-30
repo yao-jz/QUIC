@@ -11,6 +11,7 @@
 #include "config.hh"
 #include "payload/frame.hh"
 #include "utils/bytestream.hh"
+#include "utils/chunkstream.hh"
 #include "utils/variable_codec.hh"
 
 namespace thquic::payload {
@@ -705,6 +706,11 @@ class Packet : Serialization {
     std::shared_ptr<Header> GetPktHeader() { return this->header; }
 
     std::shared_ptr<Payload> GetPktPayload() { return this->payload; }
+
+    void DeletePayloadFrame(std::list<std::shared_ptr<thquic::payload::Frame>>::iterator position)
+    {
+        this->payload->DeleteFrame(position);
+    }
 
     const struct sockaddr_in& GetAddrSrc() const { return this->addrSrc; }
 

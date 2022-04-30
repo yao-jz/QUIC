@@ -71,7 +71,7 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
             {
                 if((*frame)->Type() == payload::FrameType::ACK)
                 {
-                    unAckedPacket->GetPktPayload()->DeleteFrame(frame);
+                    unAckedPacket->DeletePayloadFrame(frame);
                     break;
                 }
             }
@@ -204,11 +204,11 @@ uint64_t QUIC::SendData([[maybe_unused]] uint64_t sequence,
     utils::logger::info("sendData, streamID is {}, offset is {}", streamID, this->streamID2Offset[streamID]);
     auto this_connection = this->connections[sequence];
     // thquic::ConnectionID connection_id = this->connections[sequence]
-    while(len > 1370)
-    {
-        std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(this->SrcID2DstID[this->Sequence2ID[sequence]], this->pktnum++, this_connection->getLargestAcked());
+    // while(len > 1370)
+    // {
+    //     std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(this->SrcID2DstID[this->Sequence2ID[sequence]], this->pktnum++, this_connection->getLargestAcked());
 
-    }
+    // }
     std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(this->SrcID2DstID[this->Sequence2ID[sequence]], this->pktnum++, this_connection->getLargestAcked());
     std::shared_ptr<payload::StreamFrame> stream_frame = std::make_shared<payload::StreamFrame>(streamID, std::move(buf), len, this->streamID2Offset[streamID], len, FIN);
     this->streamID2Offset[streamID] += len;
@@ -318,7 +318,17 @@ int QUICClient::incomingMsg(
                         else if (streamFrame->FINFlag()) {
                             this->connections[sequence]->aliveStreams.erase(streamID);
                         }
-                        this->streamDataReadyCallback(sequence, streamID, streamFrame->FetchBuffer(), streamFrame->GetLength(), streamFrame->FINFlag());
+                        if(streamFrame->GetLength() != 0)
+                        {
+                            this->connections[sequence]->chunkStream.AddChunk(streamFrame->GetOffset(), streamFrame->FetchBuffer(), streamFrame->GetLength(), streamFrame->FINFlag());
+                            uint64_t len = this->connections[sequence]->chunkStream.AvailableLen();
+                            if(len > 0)
+                            {
+                                std::unique_ptr<uint8_t[]> buffer(new uint8_t[len]);
+                                this->connections[sequence]->chunkStream.Consume(len, buffer);
+                                this->streamDataReadyCallback(sequence, streamID, std::move(buffer), len, streamFrame->FINFlag());
+                            }
+                        }
                         break;
                     }
                     case payload::FrameType::CONNECTION_CLOSE: {
@@ -388,6 +398,7 @@ int QUICServer::incomingMsg(
             if(!flag)
             {
                 std::shared_ptr<Connection> connection = std::make_shared<Connection>();
+                connection->chunkStream.init();
                 id = ConnectionIDGenerator::Get().Generate();
                 connection->setAddrTo(datagram->GetAddrSrc());
                 connection->setAlive(true);
@@ -436,7 +447,17 @@ int QUICServer::incomingMsg(
                         else if (streamFrame->FINFlag()) {
                             this->connections[sequence]->aliveStreams.erase(streamID);
                         }
-                        this->streamDataReadyCallback(sequence, streamID, streamFrame->FetchBuffer(), streamFrame->GetLength(), streamFrame->FINFlag());
+                        if(streamFrame->GetLength() != 0)
+                        {
+                            this->connections[sequence]->chunkStream.AddChunk(streamFrame->GetOffset(), streamFrame->FetchBuffer(), streamFrame->GetLength(), streamFrame->FINFlag());
+                            uint64_t len = this->connections[sequence]->chunkStream.AvailableLen();
+                            if(len > 0)
+                            {
+                                std::unique_ptr<uint8_t[]> buffer(new uint8_t[len]);
+                                this->connections[sequence]->chunkStream.Consume(len, buffer);
+                                this->streamDataReadyCallback(sequence, streamID, std::move(buffer), len, streamFrame->FINFlag());
+                            }
+                        }
                         break;
                     }
                     case payload::FrameType::ACK: {
@@ -495,6 +516,7 @@ uint64_t QUICClient::CreateConnection(
     this->addrTo = addrTo;
     ConnectionID id = ConnectionIDGenerator::Get().Generate();
     std::shared_ptr<Connection> connection = std::make_shared<Connection>();
+    connection->chunkStream.init();
     connection->setAddrTo(addrTo);
     connection->setAlive(true);
     uint64_t sequence = this->connectionSequence++;

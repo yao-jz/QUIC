@@ -34,7 +34,9 @@ class Chunk : public ByteStream {
 
 class ChunkStream {
    public:
-    ChunkStream() { this->maximumContinuousChunk = this->chunks.end(); }
+    ChunkStream() { 
+        this->maximumContinuousChunk = this->chunks.end(); 
+        }
 
     void AddChunk(std::unique_ptr<uint8_t[]> buf, size_t len,
                   bool fin = false) {
@@ -48,9 +50,14 @@ class ChunkStream {
         this->checkContinuous();
     }
 
+    void init()
+    {
+        this->maximumContinuousChunk = this->chunks.end(); 
+    }
+
+
     void AddChunk(uint64_t offset, std::unique_ptr<uint8_t[]> buf, size_t len,
                   bool fin = false) {
-        
         Chunk chunk{std::move(buf), len, offset};
         this->fin |= fin;
 
@@ -62,7 +69,9 @@ class ChunkStream {
 
 
         if (this->chunks.empty()) {
+            // logger::warn("2{}", this->maximumContinuousChunk == this->chunks.end());
             this->chunks.push_back(std::move(chunk));
+            // logger::warn("3{}", this->maximumContinuousChunk == this->chunks.end());
             this->checkContinuous();
             this->maximumOffset = this->chunks.back().MaximumOffset();
             return;
@@ -205,6 +214,14 @@ class ChunkStream {
 
     uint64_t MinimumOffset() const {
         return this->chunks.front().MinimumOffset();
+    }
+
+    uint64_t MaxContinuousOffset() {
+        if(Empty())
+        {
+            return 0;
+        }
+        return this->maximumContinuousChunk->MaximumOffset();
     }
 
     bool Empty() { return this->chunks.empty(); }

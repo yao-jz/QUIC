@@ -20,6 +20,7 @@
 
 #include "time.hh"
 #include "utils/bytestream.hh"
+#include "utils/chunkstream.hh"
 #include "utils/log.hh"
 
 namespace thquic {
