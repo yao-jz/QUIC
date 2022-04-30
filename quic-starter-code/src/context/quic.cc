@@ -33,7 +33,10 @@ int QUIC::CloseConnection([[maybe_unused]] uint64_t sequence,
     close_payload->AttachFrame(close_frame);
     sockaddr_in addrTo = this_connection->getAddrTo();
     std::shared_ptr<payload::Packet> close_packet = std::make_shared<payload::Packet>(header, close_payload, addrTo);
-    this_connection->insertIntoPending(close_packet);
+    std::shared_ptr<utils::UDPDatagram> close_dg = QUIC::encodeDatagram(close_packet);
+    this->socket.sendMsg(close_dg);
+
+    // this_connection->insertIntoPending(close_packet);
     return 0;
 }
 
@@ -285,11 +288,12 @@ int QUICClient::incomingMsg(
     std::shared_ptr<Connection> connection;
     if (!(this->connections.find(sequence) == this->connections.end())) {
         connection = this->connections.find(sequence)->second;
-        if (!connection->getIsAlive()) {
-            utils::logger::warn("CONNECTION {} ALREADY CLOSED!", sequence);
-            this->ConnectionCloseCallback(sequence, "", 0);
-            return 0;
-        }
+        // if (!connection->getIsAlive()) {
+        //     utils::logger::warn("CONNECTION {} ALREADY CLOSED!", sequence);
+        //     this->CloseConnection(sequence, "", 0);
+        //     this->ConnectionCloseCallback(sequence, "", 0);
+        //     return 0;
+        // }
     }
 
     switch (packetType) {
@@ -331,21 +335,36 @@ int QUICClient::incomingMsg(
                             connection->aliveStreams.erase(streamID);
                         }
                         this->streamDataReadyCallback(sequence, streamID, streamFrame->FetchBuffer(), streamFrame->GetLength(), streamFrame->FINFlag());
+                        if (!this->connections[sequence]->getIsAlive()) {
+                            this->CloseConnection(sequence, "", 0);
+                            utils::logger::warn("CONNECTION {} ALREADY CLOSED!", sequence);
+                        }
                         break;
                     }
                     case payload::FrameType::CONNECTION_CLOSE: {
                         utils::logger::info("SERVER Frame Type::CONNECTION_CLOSE");
-                        this->ConnectionCloseCallback(sequence, "", 0);
+                        if (this->connections[sequence]->getIsAlive()){
+                            this->CloseConnection(sequence, "", 0);
+                            this->ConnectionCloseCallback(sequence, "", 0);
+                        }
                         break;
                     }
                     case payload::FrameType::ACK:{
                         std::shared_ptr<payload::ACKFrame> ackFrame = std::static_pointer_cast<payload::ACKFrame>(frame);
                         this->handleACKFrame(ackFrame, sequence);
+                        if (!this->connections[sequence]->getIsAlive()) {
+                            this->CloseConnection(sequence, "", 0);
+                            utils::logger::warn("CONNECTION {} ALREADY CLOSED!", sequence);
+                        }
                         break;
                     }
                     case payload::FrameType::PING:{
                         utils::logger::info("SERVER Frame Type::PING");
                         ackEliciting = true;
+                        if (!this->connections[sequence]->getIsAlive()) {
+                            this->CloseConnection(sequence, "", 0);
+                            utils::logger::warn("CONNECTION {} ALREADY CLOSED!", sequence);
+                        }
                         break;
                     }
                     default: utils::logger::warn("UNKNOWN FRAME TYPE");
@@ -376,11 +395,12 @@ int QUICServer::incomingMsg(
     std::shared_ptr<Connection> connection;
     if (!(this->connections.find(sequence) == this->connections.end())) {
         connection = this->connections.find(sequence)->second;
-        if (!connection->getIsAlive()) {
-            this->ConnectionCloseCallback(sequence, "", 0);
-            utils::logger::warn("CONNECTION {} ALREADY CLOSED!", sequence);
-            return 0;
-        }
+        // if (!connection->getIsAlive()) {
+        //     this->ConnectionCloseCallback(sequence, "", 0);
+        //     utils::logger::warn("CONNECTION {} ALREADY CLOSED!", sequence);
+        //     this->CloseConnection(sequence, "", 0);
+        //     return 0;
+        // }
     }
     
     payload::PacketType packetType = header->Type();
@@ -459,22 +479,37 @@ int QUICServer::incomingMsg(
                             connection->aliveStreams.erase(streamID);
                         }
                         this->streamDataReadyCallback(sequence, streamID, streamFrame->FetchBuffer(), streamFrame->GetLength(), streamFrame->FINFlag());
+                        if (!this->connections[sequence]->getIsAlive()) {
+                            this->CloseConnection(sequence, "", 0);
+                            utils::logger::warn("CONNECTION {} ALREADY CLOSED!", sequence);
+                        }
                         break;
                     }
                     case payload::FrameType::ACK: {
                         utils::logger::info("CLIENT Frame Type::ACK");
                         std::shared_ptr<payload::ACKFrame> ackFrame = std::static_pointer_cast<payload::ACKFrame>(frame);
                         this->handleACKFrame(ackFrame, sequence);
+                        if (!this->connections[sequence]->getIsAlive()) {
+                            this->CloseConnection(sequence, "", 0);
+                            utils::logger::warn("CONNECTION {} ALREADY CLOSED!", sequence);
+                        }
                         break;
                     }
                     case payload::FrameType::CONNECTION_CLOSE: {
                         utils::logger::info("CLIENT Frame Type::CONNECTION_CLOSE");
-                        this->ConnectionCloseCallback(sequence, "", 0);
+                        if (this->connections[sequence]->getIsAlive()){
+                            this->CloseConnection(sequence, "", 0);
+                            this->ConnectionCloseCallback(sequence, "", 0);
+                        }
                         break;
                     }
                     case payload::FrameType::PING: {
                         utils::logger::info("CLIENT Frame Type::PING");
                         ackEliciting = true;
+                        if (!this->connections[sequence]->getIsAlive()) {
+                            this->CloseConnection(sequence, "", 0);
+                            utils::logger::warn("CONNECTION {} ALREADY CLOSED!", sequence);
+                        }
                         break;
                     }
                     default: utils::logger::warn("UNKNOWN FRAME TYPE");
