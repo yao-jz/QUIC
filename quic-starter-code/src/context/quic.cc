@@ -49,7 +49,7 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
     std::map<uint64_t,std::shared_ptr<payload::Packet>>& unAckedPackets = connection->getUnAckedPackets();
     std::list<std::shared_ptr<payload::Packet>>& pendingPackets = connection->GetPendingPackets();
 
-    if (connection->initial_complete) {
+    if (!connection->initial_complete) {
         std::shared_ptr<payload::Initial> initial_header = std::make_shared<payload::Initial>(config::QUIC_VERSION, this->Sequence2ID[connection->sequence], ConnectionID(), this->pktnum++, connection->getLargestAcked());
         std::shared_ptr<payload::Payload> initial_payload = std::make_shared<payload::Payload>();
         std::shared_ptr<payload::Packet> initial_packet = std::make_shared<payload::Packet>(initial_header, initial_payload, connection->getAddrTo());
@@ -195,8 +195,12 @@ uint64_t QUIC::SendData([[maybe_unused]] uint64_t sequence,
     utils::logger::info("sendData, streamID is {}, offset is {}\n", streamID, this->streamID2Offset[streamID]);
     auto this_connection = this->connections[sequence];
     // thquic::ConnectionID connection_id = this->connections[sequence]
+    while(len > 1370)
+    {
+        std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(this->SrcID2DstID[this->Sequence2ID[sequence]], this->pktnum++, this_connection->getLargestAcked());
+
+    }
     std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(this->SrcID2DstID[this->Sequence2ID[sequence]], this->pktnum++, this_connection->getLargestAcked());
-    // std::shared_ptr<payload::StreamFrame> stream_frame = std::make_shared<payload::StreamFrame>(streamID, std::move(buf), len, 0, len, FIN);
     std::shared_ptr<payload::StreamFrame> stream_frame = std::make_shared<payload::StreamFrame>(streamID, std::move(buf), len, this->streamID2Offset[streamID], len, FIN);
     this->streamID2Offset[streamID] += len;
     std::shared_ptr<payload::Payload> stream_payload = std::make_shared<payload::Payload>();
@@ -257,7 +261,7 @@ void QUIC::handleACKFrame(std::shared_ptr<payload::ACKFrame> ackFrame, uint64_t 
 
 int QUICClient::incomingMsg(
     [[maybe_unused]] std::unique_ptr<utils::UDPDatagram> datagram) {
-    
+    std::cout<<std::endl;
     size_t bufferLen = datagram->BufferLen();
     utils::ByteStream stream = utils::ByteStream(datagram->FetchBuffer(), bufferLen);
     std::shared_ptr<payload::Header> header = payload::Header::Parse(stream);
@@ -331,6 +335,7 @@ int QUICClient::incomingMsg(
 int QUICServer::incomingMsg(
     [[maybe_unused]] std::unique_ptr<utils::UDPDatagram> datagram) {
 
+    std::cout<<std::endl;
     size_t bufferLen = datagram->BufferLen();
     utils::ByteStream stream = utils::ByteStream(datagram->FetchBuffer(), bufferLen);
     std::shared_ptr<payload::Header> header = payload::Header::Parse(stream);
@@ -363,11 +368,11 @@ int QUICServer::incomingMsg(
             if(!flag)
             {
                 std::shared_ptr<Connection> connection = std::make_shared<Connection>();
-                ConnectionID id = ConnectionIDGenerator::Get().Generate();
+                id = ConnectionIDGenerator::Get().Generate();
                 connection->setAddrTo(datagram->GetAddrSrc());
                 connection->setAlive(true);
                 connection->initial_complete = true;
-                uint64_t sequence = this->connectionSequence++;
+                sequence = this->connectionSequence++;
                 this->connections[sequence] = connection;
                 this->Sequence2ID[sequence] = id; 
                 this->ID2Sequence[id] = sequence;
