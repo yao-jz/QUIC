@@ -70,8 +70,19 @@ class Connection {
         return this->ACKRanges;
     }
 
+    bool getIsAlive()
+    {
+        return this->alive;
+    }
+
+    void setAlive(bool flag)
+    {
+        this->alive = flag;
+    }
+
     
    private:
+    bool alive;
     std::list<std::shared_ptr<payload::Packet>> pendingPackets;
     std::map<uint64_t,std::shared_ptr<payload::Packet>> unAckedPackets; // packetnum to packet
     struct sockaddr_in addrTo;
@@ -80,6 +91,8 @@ class Connection {
     public:
     std::map<uint64_t, std::chrono::steady_clock::time_point> packetRecvTime;
     std::chrono::steady_clock::time_point last_ping;
+    bool initial_complete = false;
+    int sequence;
 };
 
 }  // namespace thquic::context

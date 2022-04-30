@@ -25,6 +25,8 @@ int QUIC::CloseConnection([[maybe_unused]] uint64_t sequence,
                           [[maybe_unused]] uint64_t errorCode) {
     utils::logger::info("CloseConnection\n");
     auto this_connection = this->connections[sequence];
+    this_connection->setAlive(false);
+    this_connection->getUnAckedPackets().clear();
     std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(ConnectionID(), this->pktnum++, this_connection->getLargestAcked());
     std::shared_ptr<payload::ConnectionCloseAppFrame> close_frame = std::make_shared<payload::ConnectionCloseAppFrame>(errorCode,reason);
     std::shared_ptr<payload::Payload> close_payload = std::make_shared<payload::Payload>();
@@ -47,6 +49,14 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
     std::map<uint64_t,std::shared_ptr<payload::Packet>>& unAckedPackets = connection->getUnAckedPackets();
     std::list<std::shared_ptr<payload::Packet>>& pendingPackets = connection->GetPendingPackets();
 
+    if (!connection->initial_complete) {
+        std::shared_ptr<payload::Initial> initial_header = std::make_shared<payload::Initial>(config::QUIC_VERSION, this->Sequence2ID[connection->sequence], ConnectionID(), this->pktnum++, connection->getLargestAcked());
+        std::shared_ptr<payload::Payload> initial_payload = std::make_shared<payload::Payload>();
+        std::shared_ptr<payload::Packet> initial_packet = std::make_shared<payload::Packet>(initial_header, initial_payload, connection->getAddrTo());
+        connection->last_ping = std::chrono::steady_clock::now();
+        connection->insertIntoPending(initial_packet);
+    }
+
     // restransmisson when time's up
     std::vector<uint64_t> packetNumsDel;
     for(auto packet_pair : unAckedPackets) {
@@ -59,8 +69,8 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
             uint64_t full = this->pktnum++;
             // reencode the packet number (because the length field may be changed)
             utils::TruncatedPacketNumber truncated = utils::encodePacketNumber(full, connection->getLargestAcked());
-            mixin->SetTruncatedPacketNumber(truncated.first, truncated.second);
-            mixin->SetFullPacketNumber(full);
+            mixin->ChangeTruncatedPacketNumber(truncated.first, truncated.second);
+            mixin->ChangeFullPacketNumber(full);
             connection->insertIntoPending(unAckedPacket);
             packetNumsDel.push_back(packet_pair.first);
         }
@@ -125,7 +135,6 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
 int QUIC::SocketLoop() {
     std::cout << "enter socket loop " << std::endl;
     for (;;) {
-
         auto datagram = this->socket.tryRecvMsg(10ms);
         if (datagram) {
             this->incomingMsg(std::move(datagram));
@@ -139,7 +148,7 @@ int QUIC::SocketLoop() {
                 pendingPackets.front()->MarkSendTimestamp(now);
                 auto newDatagram = QUIC::encodeDatagram(pendingPackets.front());
                 this->socket.sendMsg(newDatagram);
-                connection.second->insertIntoUnAckedPackets(pendingPackets.front()->GetPacketNumber(), pendingPackets.front());
+                if(pendingPackets.front()->IsACKEliciting()) connection.second->insertIntoUnAckedPackets(pendingPackets.front()->GetPacketNumber(), pendingPackets.front());
                 pendingPackets.pop_front();
             }
         }
@@ -231,6 +240,7 @@ void QUIC::handleACKFrame(std::shared_ptr<payload::ACKFrame> ackFrame, uint64_t 
         for (uint64_t packetNumber = interval.Start(); packetNumber <= interval.End(); packetNumber++) {
             // change tracking interval
             std::shared_ptr<thquic::payload::Packet> packet = connection->getUnAckedPacket(packetNumber);
+            if(packet == nullptr) continue;
             for (auto frame : packet->GetPktPayload()->GetFrames()) {
                 if(frame->Type() == payload::FrameType::ACK) {
                     std::shared_ptr<payload::ACKFrame> subFrame = std::static_pointer_cast<payload::ACKFrame>(frame);
@@ -263,6 +273,7 @@ int QUICClient::incomingMsg(
             utils::logger::info("RECV A INITIAL PACKET FROM SERVER");
             this->connectionReadyCallback(this->ID2Sequence[header->GetDstID()]);
             this->SrcID2DstID[header->GetDstID()] = ih->GetSrcID();
+            this->connections[sequence]->initial_complete = true;
             break;
         }
         case payload::PacketType::ZERO_RTT:
@@ -336,16 +347,36 @@ int QUICServer::incomingMsg(
             ih->RestoreFullPacketNumber(0);
             uint64_t recvPacketNumber = ih->GetPacketNumber();
             utils::logger::info("RECV A PACKET FROM CLIENT, PACKET NUMBER: {}", recvPacketNumber);
-            std::shared_ptr<Connection> connection = std::make_shared<Connection>();
-            ConnectionID id = ConnectionIDGenerator::Get().Generate();
-            connection->setAddrTo(datagram->GetAddrSrc());
-            uint64_t sequence = this->connectionSequence++;
-            this->connections[sequence] = connection;
-            this->Sequence2ID[sequence] = id; 
-            this->ID2Sequence[id] = sequence;
-            this->SrcID2DstID[id] = ih->GetSrcID();
-            this->connections[sequence]->packetRecvTime[recvPacketNumber] = now;
-            std::shared_ptr<payload::Initial> initial_header = std::make_shared<payload::Initial>(config::QUIC_VERSION, id, this->SrcID2DstID[id], this->pktnum++, connection->getLargestAcked());
+            ConnectionID id;
+            uint64_t sequence;
+            bool flag = false;
+            for(auto pair : this->connections)
+            {
+                if((pair.second->getAddrTo().sin_addr.s_addr == datagram->GetAddrSrc().sin_addr.s_addr) 
+                    && (pair.second->getAddrTo().sin_port == datagram->GetAddrSrc().sin_port))
+                {
+                    sequence = pair.first;
+                    id = this->Sequence2ID[sequence];
+                    flag = true;
+                    pair.second->packetRecvTime[recvPacketNumber] = now;
+                    break;
+                }
+            }
+            if(!flag)
+            {
+                std::shared_ptr<Connection> connection = std::make_shared<Connection>();
+                ConnectionID id = ConnectionIDGenerator::Get().Generate();
+                connection->setAddrTo(datagram->GetAddrSrc());
+                connection->setAlive(true);
+                connection->initial_complete = true;
+                uint64_t sequence = this->connectionSequence++;
+                this->connections[sequence] = connection;
+                this->Sequence2ID[sequence] = id; 
+                this->ID2Sequence[id] = sequence;
+                this->SrcID2DstID[id] = ih->GetSrcID();
+                this->connections[sequence]->packetRecvTime[recvPacketNumber] = now;
+            }
+            std::shared_ptr<payload::Initial> initial_header = std::make_shared<payload::Initial>(config::QUIC_VERSION, id, this->SrcID2DstID[id], this->pktnum++, 0);
             std::shared_ptr<payload::Payload> initial_payload = std::make_shared<payload::Payload>();
             std::shared_ptr<payload::Packet> initial_packet = std::make_shared<payload::Packet>(initial_header, initial_payload, datagram->GetAddrSrc());
             std::shared_ptr<utils::UDPDatagram> initial_dg = QUIC::encodeDatagram(initial_packet);
@@ -431,7 +462,9 @@ uint64_t QUICClient::CreateConnection(
     ConnectionID id = ConnectionIDGenerator::Get().Generate();
     std::shared_ptr<Connection> connection = std::make_shared<Connection>();
     connection->setAddrTo(addrTo);
+    connection->setAlive(true);
     uint64_t sequence = this->connectionSequence++;
+    connection->sequence = sequence;
     this->connections[sequence] = connection;
     this->ID2Sequence[id] = sequence;
     this->Sequence2ID[sequence] = id;
