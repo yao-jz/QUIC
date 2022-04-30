@@ -54,7 +54,7 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
         std::shared_ptr<payload::Initial> initial_header = std::make_shared<payload::Initial>(config::QUIC_VERSION, this->Sequence2ID[connection->sequence], ConnectionID(), this->pktnum++, connection->getLargestAcked());
         std::shared_ptr<payload::Payload> initial_payload = std::make_shared<payload::Payload>();
         std::shared_ptr<payload::Packet> initial_packet = std::make_shared<payload::Packet>(initial_header, initial_payload, connection->getAddrTo());
-        connection->last_ping = std::chrono::steady_clock::now();
+        // connection->last_ping = std::chrono::steady_clock::now();
         connection->last_initial = std::chrono::steady_clock::now();
         connection->insertIntoPending(initial_packet);
     }
@@ -93,19 +93,20 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
     }
 
     // // 判断是否要发送ping
-    // std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+    now = std::chrono::steady_clock::now();
     // // ping的间隔时间
-    // if (std::chrono::duration_cast<std::chrono::milliseconds>(now - connection->last_ping).count() > 10) {
-    //     // 开始发送PING frame
-    //     utils::logger::info("sending PING FRAME...");
-    //     std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(ConnectionID(), this->pktnum++, connection->getLargestAcked());
-    //     std::shared_ptr<payload::PingFrame> ping_frame = std::make_shared<payload::PingFrame>();
-    //     std::shared_ptr<payload::Payload> ping_payload = std::make_shared<payload::Payload>();
-    //     ping_payload->AttachFrame(ping_frame);
-    //     sockaddr_in addrTo = connection->getAddrTo();
-    //     std::shared_ptr<payload::Packet> ping_packet = std::make_shared<payload::Packet>(header, ping_payload, addrTo);
-    //     connection->insertIntoPending(ping_packet);
-    // }
+    if (std::chrono::duration_cast<std::chrono::milliseconds>(now - connection->last_ping).count() > 1000) {
+        // 开始发送PING frame
+        utils::logger::info("sending PING FRAME...");
+        std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(ConnectionID(), this->pktnum++, connection->getLargestAcked());
+        std::shared_ptr<payload::PingFrame> ping_frame = std::make_shared<payload::PingFrame>();
+        std::shared_ptr<payload::Payload> ping_payload = std::make_shared<payload::Payload>();
+        ping_payload->AttachFrame(ping_frame);
+        sockaddr_in addrTo = connection->getAddrTo();
+        std::shared_ptr<payload::Packet> ping_packet = std::make_shared<payload::Packet>(header, ping_payload, addrTo);
+        connection->last_ping = now;
+        connection->insertIntoPending(ping_packet);
+    }
 
     // 有即将发送的包，顺带发送ack
     if(!pendingPackets.empty() && !connection->getACKRanges().Empty())
