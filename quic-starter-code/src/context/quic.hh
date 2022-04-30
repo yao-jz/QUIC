@@ -16,6 +16,7 @@
 #include "utils/socket.hh"
 #include "utils/time.hh"
 
+
 namespace thquic::context {
 
 class QUIC {
@@ -53,8 +54,7 @@ class QUIC {
         const std::shared_ptr<payload::Packet>& pkt);
     virtual int incomingMsg(std::unique_ptr<utils::UDPDatagram> datagram) = 0;
     void handleACKFrame(std::shared_ptr<payload::ACKFrame> ackFrame, uint64_t sequence);
-
-
+    // Connection relative
     bool alive{true};
     uint64_t pktnum = 1;
     const PeerType type;
