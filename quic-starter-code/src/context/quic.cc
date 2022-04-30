@@ -265,18 +265,19 @@ void QUIC::handleACKFrame(std::shared_ptr<payload::ACKFrame> ackFrame, uint64_t 
             connection->min_rtt = connection->latest_rtt;
             connection->smoothed_rtt = connection->latest_rtt;
             connection->rttvar = connection->latest_rtt / 2;
-            connection->
-            first_rtt_sample = 1;
+            connection->first_rtt_sample = 1;
         }
-        connection->min_rtt = connection->min_rtt < connection->latest_rtt ? connection->min_rtt : connection->latest_rtt;
-        // TODO: Handshake
-        uint64_t adjusted_rtt = connection->latest_rtt;
-        if (connection->latest_rtt > connection->min_rtt + ack_delay){
-            adjusted_rtt = connection->latest_rtt - ack_delay;
+        else {
+            connection->min_rtt = connection->min_rtt < connection->latest_rtt ? connection->min_rtt : connection->latest_rtt;
+            // TODO: Handshake
+            uint64_t adjusted_rtt = connection->latest_rtt;
+            if (connection->latest_rtt > connection->min_rtt + ack_delay){
+                adjusted_rtt = connection->latest_rtt - ack_delay;
+            }
+            int64_t diff = connection->smoothed_rtt - adjusted_rtt;
+            connection->rttvar = 3*connection->rttvar/4 + (diff >= 0 ? diff : -diff)/4;
+            connection->smoothed_rtt = 7 * connection->smoothed_rtt / 8 + adjusted_rtt/8;
         }
-        int64_t diff = connection->smoothed_rtt - adjusted_rtt;
-        connection->rttvar = 3/4 * connection->rttvar + 1/4 * (diff >= 0 ? diff : -diff);
-        connection->smoothed_rtt = 7/8 * connection->smoothed_rtt + 1/8 * adjusted_rtt;
     }
     utils::logger::info("ESTIMATE RTT: {}", connection->smoothed_rtt);
     for (utils::Interval interval : ackedIntervals) {
@@ -296,8 +297,8 @@ void QUIC::handleACKFrame(std::shared_ptr<payload::ACKFrame> ackFrame, uint64_t 
             connection->removeFromUnAckedPackets(packetNumber);
         }
     }
-    uint64_t newLargetstAcked = ackFrame->GetLargestACKed();
-    if (newLargetstAcked > connection->getLargestAcked()) connection->setLargestAcked(newLargetstAcked);
+    // uint64_t newLargetstAcked = ackFrame->GetLargestACKed();
+    if (largestAcked > connection->getLargestAcked()) connection->setLargestAcked(largestAcked);
 }
 
 
