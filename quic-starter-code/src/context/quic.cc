@@ -235,24 +235,27 @@ std::shared_ptr<utils::UDPDatagram> QUIC::encodeDatagram(
 
 
 void QUIC::handleACKFrame(std::shared_ptr<payload::ACKFrame> ackFrame, uint64_t sequence) {
+    std::shared_ptr<thquic::context::Connection> connection = this->connections[sequence];
     std::list<utils::Interval> ackedIntervals = ackFrame->GetACKRanges().Intervals();
     for (utils::Interval interval : ackedIntervals) {
         utils::logger::warn("ACKED PACKETS: START = {}, END = {}", interval.Start(), interval.End());
         for (uint64_t packetNumber = interval.Start(); packetNumber <= interval.End(); packetNumber++) {
             // change tracking interval
-            std::shared_ptr<thquic::payload::Packet> packet = this->connections[sequence]->getUnAckedPacket(packetNumber);
+            std::shared_ptr<thquic::payload::Packet> packet = connection->getUnAckedPacket(packetNumber);
             if(packet == nullptr) continue;
             for (auto frame : packet->GetPktPayload()->GetFrames()) {
                 if(frame->Type() == payload::FrameType::ACK) {
                     std::shared_ptr<payload::ACKFrame> subFrame = std::static_pointer_cast<payload::ACKFrame>(frame);
                     uint64_t largestAcked = subFrame->GetLargestACKed();
-                    this->connections[sequence]->getACKRanges().RemoveInterval(0, largestAcked);
+                    connection->getACKRanges().RemoveInterval(0, largestAcked);
                 }
             }
             // remove acked packets
-            this->connections[sequence]->removeFromUnAckedPackets(packetNumber);
+            connection->removeFromUnAckedPackets(packetNumber);
         }
     }
+    uint64_t newLargetstAcked = ackFrame->GetLargestACKed();
+    if (newLargetstAcked > connection->getLargestAcked()) connection->setLargestAcked(newLargetstAcked);
 }
 
 
