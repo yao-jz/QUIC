@@ -70,7 +70,7 @@ class Connection {
     {
         return this->alive;
     }
-    
+
     void setAlive(bool flag)
     {
         this->alive = flag;
