@@ -296,7 +296,7 @@ uint64_t QUIC::SendData([[maybe_unused]] uint64_t sequence,
     uint8_t *buffer = buf.release();
     while(len > MAX_SLICE_LENGTH)
     {
-        std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(this->SrcID2DstID[this->Sequence2ID[sequence]], 0, this_connection->getLargestAcked());
+        std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(this->SrcID2DstID[this->Sequence2ID[sequence]], this->pktnum, this_connection->getLargestAcked());
         std::unique_ptr<uint8_t[]> tmp = std::make_unique<uint8_t[]>(MAX_SLICE_LENGTH);
         std::copy(buffer, buffer + MAX_SLICE_LENGTH, tmp.get());
         std::shared_ptr<payload::StreamFrame> stream_frame = std::make_shared<payload::StreamFrame>(streamID, std::move(tmp), MAX_SLICE_LENGTH, this->streamID2Offset[streamID], MAX_SLICE_LENGTH, FIN);
@@ -309,7 +309,8 @@ uint64_t QUIC::SendData([[maybe_unused]] uint64_t sequence,
         std::shared_ptr<payload::Packet> stream_packet = std::make_shared<payload::Packet>(header, stream_payload, addrTo);
         this_connection->insertIntoBuffer(stream_packet);
     }
-    std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(this->SrcID2DstID[this->Sequence2ID[sequence]], 0, this_connection->getLargestAcked());
+    std::cout<<this_connection->getLargestAcked()<<std::endl;
+    std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(this->SrcID2DstID[this->Sequence2ID[sequence]], this->pktnum, this_connection->getLargestAcked());
     std::unique_ptr<uint8_t[]> tmp = std::make_unique<uint8_t[]>(len);
     std::copy(buffer, buffer + len, tmp.get());
     std::shared_ptr<payload::StreamFrame> stream_frame = std::make_shared<payload::StreamFrame>(streamID, std::move(tmp), len, this->streamID2Offset[streamID], len, FIN);
