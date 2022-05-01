@@ -67,7 +67,7 @@ void QUIC::checkInitialPacket(std::shared_ptr<Connection> connection, std::chron
  */
 void QUIC::checkPingPacket(std::shared_ptr<Connection> connection, std::chrono::steady_clock::time_point& now){
     // ping的间隔时间
-    if (std::chrono::duration_cast<std::chrono::milliseconds>(now - connection->last_ping).count() > 1000) {
+    if (now - connection->last_ping > config::PING_INTERVAL) {
         // 开始发送PING frame
         utils::logger::info("sending PING FRAME...");
         std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(ConnectionID(), this->pktnum++, connection->getLargestAcked());
@@ -88,17 +88,16 @@ void QUIC::checkPingPacket(std::shared_ptr<Connection> connection, std::chrono::
 void QUIC::detectLossAndRetransmisson(std::shared_ptr<Connection> connection, std::chrono::steady_clock::time_point& now) {
     // get unacked packets sent by this connection
     std::map<uint64_t,std::shared_ptr<payload::Packet>>& unAckedPackets = connection->getUnAckedPackets();
-    uint64_t rawThreshold = K_TIME_THRESHOLD(connection->latest_rtt > connection->smoothed_rtt ? connection->latest_rtt : connection->smoothed_rtt);
-    uint64_t timeThreshold = (std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() 
-            - (rawThreshold > K_GRANULARITY ? rawThreshold : K_GRANULARITY));
-    uint64_t pktThreshold = (connection->getLargestAcked() > K_PACKET_THRESHOLD) ? 
-            connection->getLargestAcked() - K_PACKET_THRESHOLD : 0;
+    utils::duration rawThreshold = K_TIME_THRESHOLD((connection->latest_rtt > connection->smoothed_rtt ? connection->latest_rtt : connection->smoothed_rtt));
+    utils::timepoint timeThreshold = now - (rawThreshold > config::loss_detection::GRANULARITY ? rawThreshold : config::loss_detection::GRANULARITY);
+    uint64_t pktThreshold = (connection->getLargestAcked() > config::loss_detection::PACKET_THRESHOLD) ? 
+            connection->getLargestAcked() - config::loss_detection::PACKET_THRESHOLD : 0;
     std::vector<uint64_t> packetNumsDel;
     for(auto packet_pair : unAckedPackets) {
         std::shared_ptr<payload::Packet> packet = packet_pair.second;
         // we don't think it is lost
         if(packet->GetPacketNumber() > connection->getLargestAcked()) continue;
-        uint64_t sendTime = std::chrono::duration_cast<std::chrono::milliseconds>(packet_pair.second->GetSendTimestamp().time_since_epoch()).count();
+        utils::timepoint sendTime = packet_pair.second->GetSendTimestamp();
         // packet loss when: (1) packet number < largest acked - kPackethreshold (2) timeSent < now - timeThreshold
         if (packet->GetPacketNumber() < pktThreshold || sendTime < timeThreshold) {
             utils::logger::warn("PACKET LOST, NUMBER = {}", packet->GetPacketNumber());
@@ -140,6 +139,7 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
     std::list<std::shared_ptr<payload::Packet>>& pendingPackets = connection->GetPendingPackets();
     std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
 
+    // check if initial packet needed
     this->checkInitialPacket(connection, now);
 
     // check if there's loss and retransmission
@@ -149,40 +149,30 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
     this->checkPingPacket(connection, now);
 
     // 有即将发送的包，顺带发送ack
-    if(!pendingPackets.empty() && !connection->getACKRanges().Empty())
-    {
-        std::shared_ptr<payload::Packet> packet = pendingPackets.front();
+    if(!connection->getACKRanges().Empty()) {
         uint64_t pktNumber = connection->getACKRanges().GetEnd();
         uint64_t delay = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - connection->packetRecvTime.find(pktNumber)->second).count();
-        std::shared_ptr<payload::ACKFrame> ackFrame = std::make_shared<payload::ACKFrame>(delay, connection->getACKRanges());
+        if (!pendingPackets.empty()) {
+            std::shared_ptr<payload::Packet> packet = pendingPackets.front();
+            std::shared_ptr<payload::ACKFrame> ackFrame = std::make_shared<payload::ACKFrame>(delay, connection->getACKRanges());
+            packet->GetPktPayload()->AttachFrame(ackFrame);
+            connection->packetRecvTime.clear();
+        } else {
+            if (connection->first_ack_time + config::MAX_ACK_DELAY > std::chrono::steady_clock::now()) {
+                std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(this->SrcID2DstID[this->Sequence2ID[connection->sequence]],
+                     this->pktnum++, connection->getLargestAcked());
+                std::shared_ptr<payload::Payload> payload = std::make_shared<payload::Payload>();
+                std::shared_ptr<payload::ACKFrame> ackFrame = std::make_shared<payload::ACKFrame>(delay, connection->getACKRanges());
+                connection->packetRecvTime.clear();
+                payload->AttachFrame(ackFrame);
+                std::shared_ptr<payload::Packet> packet = std::make_shared<payload::Packet>(header, payload, connection->getAddrTo());
+                pendingPackets.push_back(packet);
+            }
+        }
+        
         connection->packetRecvTime.clear();
-        packet->GetPktPayload()->AttachFrame(ackFrame);
+        
     }
-
-    // // 没有即将发送的包，但有ack要超时了, 发送纯ACK包
-    // if(pendingPackets.empty())
-    // {
-    //     bool flag = false;
-    //     for(auto pair : connection->packetRecvTime)
-    //     {
-    //         std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
-    //         if(duration_cast<std::chrono::milliseconds>(now - pair.second).count() > 7500)// todo 最大 ack 回复延迟
-    //         {
-    //             flag = true;
-    //             break;
-    //         }
-    //     }
-    //     if(flag)
-    //     {
-    //         std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(this->SrcID2DstID[this->Sequence2ID[connection.first]], this->pktnum++, connection->getLargestAcked());
-    //         std::shared_ptr<payload::Payload> payload = std::make_shared<payload::Payload>();
-    //         std::shared_ptr<payload::ACKFrame> ackFrame = std::make_shared<payload::ACKFrame>(20, connection->getACKRanges());// todo ACKDelay?
-    //         connection->packetRecvTime.clear();
-    //         payload->AttachFrame(ackFrame);
-    //         std::shared_ptr<payload::Packet> packet = std::make_shared<payload::Packet>(header, payload, connection->getAddrTo());
-    //         pendingPackets.push_back(packet);
-    //     }
-    // }
     return pendingPackets;
 }
 
@@ -320,37 +310,40 @@ void QUIC::handleACKFrame(std::shared_ptr<payload::ACKFrame> ackFrame, uint64_t 
     std::shared_ptr<thquic::context::Connection> connection = this->connections[sequence];
     std::list<utils::Interval> ackedIntervals = ackFrame->GetACKRanges().Intervals();
     uint64_t largestAcked = ackFrame->GetLargestACKed();
-    // updating RTT !
+    // check if this ACK frame is valid
     std::shared_ptr<payload::Packet> latestPacket = connection->getUnAckedPacket(largestAcked);
     if (latestPacket == nullptr) return;
-    if (largestAcked > connection->getLargestAcked() && latestPacket->IsACKEliciting()){
-        uint64_t ack_delay = ackFrame->GetACKDelay() > MAX_ACK_DELAY ? MAX_ACK_DELAY : ackFrame->GetACKDelay();
-        connection->latest_rtt = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - latestPacket->GetSendTimestamp()).count();
-        if (connection->first_rtt_sample == 0) {
+    bool isNewlyAcked = (largestAcked > (connection->getLargestAcked()) || (connection->getLargestAcked() == std::numeric_limits<uint64_t>::max()));
+    // check if this ACK frame can be used for RTT estimation
+    if (isNewlyAcked && latestPacket->IsACKEliciting()){
+        utils::duration ack_delay = std::chrono::milliseconds(ackFrame->GetACKDelay());
+        if (ack_delay < config::MAX_ACK_DELAY) ack_delay = config::MAX_ACK_DELAY;
+        connection->latest_rtt = std::chrono::steady_clock::now() - latestPacket->GetSendTimestamp();
+        if (connection->first_rtt_sample == std::chrono::milliseconds(0)) {
             connection->min_rtt = connection->latest_rtt;
             connection->smoothed_rtt = connection->latest_rtt;
             connection->rttvar = connection->latest_rtt / 2;
-            connection->first_rtt_sample = 1;
+            connection->first_rtt_sample = std::chrono::milliseconds(1);
         }
         else {
             connection->min_rtt = connection->min_rtt < connection->latest_rtt ? connection->min_rtt : connection->latest_rtt;
             // TODO: Handshake
-            uint64_t adjusted_rtt = connection->latest_rtt;
+            utils::duration adjusted_rtt = connection->latest_rtt;
             if (connection->latest_rtt > connection->min_rtt + ack_delay){
                 adjusted_rtt = connection->latest_rtt - ack_delay;
             }
-            int64_t diff = connection->smoothed_rtt - adjusted_rtt;
-            connection->rttvar = 3*connection->rttvar/4 + (diff >= 0 ? diff : -diff)/4;
-            connection->smoothed_rtt = 7 * connection->smoothed_rtt / 8 + adjusted_rtt/8;
+            utils::duration diff = connection->smoothed_rtt > adjusted_rtt ? connection->smoothed_rtt - adjusted_rtt : adjusted_rtt - connection->smoothed_rtt;
+            connection->rttvar = 3 * connection->rttvar / 4 + diff / 4;
+            connection->smoothed_rtt = 7 * connection->smoothed_rtt / 8 + adjusted_rtt / 8;
         }
     }
-    utils::logger::info("ESTIMATE RTT: {}", connection->smoothed_rtt);
+    utils::logger::info("ESTIMATE RTT: {}", utils::formatTimeDuration(connection->smoothed_rtt));
     for (utils::Interval interval : ackedIntervals) {
         utils::logger::info("ACKED PACKETS: START = {}, END = {}", interval.Start(), interval.End());
         for (uint64_t packetNumber = interval.Start(); packetNumber <= interval.End(); packetNumber++) {
             // change tracking interval
             std::shared_ptr<thquic::payload::Packet> packet = connection->getUnAckedPacket(packetNumber);
-            if(packet == nullptr) continue;
+            if (packet == nullptr) continue;
             if (packet->IsByteInflight()) {
                 this->connections[sequence]->bytesInFlight -= packet->EncodeLen();
                 // if (this->inCongestionRecovery(sequence, packet->GetSendTimestamp())) {
@@ -376,7 +369,9 @@ void QUIC::handleACKFrame(std::shared_ptr<payload::ACKFrame> ackFrame, uint64_t 
         }
     }
     // uint64_t newLargetstAcked = ackFrame->GetLargestACKed();
-    if (largestAcked > connection->getLargestAcked()) connection->setLargestAcked(largestAcked);
+    if (isNewlyAcked > connection->getLargestAcked()) {
+        connection->setLargestAcked(largestAcked);
+    }
 }
 
 void QUIC::onPacketsLost(std::list<std::shared_ptr<payload::Packet>> lostPackets, int sequence){
@@ -505,6 +500,9 @@ int QUICClient::incomingMsg(
             }
             if (ackEliciting) {
                 connection->getACKRanges().AddInterval(recvPacketNumber, recvPacketNumber);
+                // mark as the most earliest
+                if (connection->first_ack_time == utils::timepoint(utils::duration(0)))
+                    connection->first_ack_time = std::chrono::steady_clock::now();
             }
             break;
         }
@@ -663,6 +661,9 @@ int QUICServer::incomingMsg(
             }
             if (ackEliciting) {
                 connection->getACKRanges().AddInterval(recvPacketNumber, recvPacketNumber);
+                 // mark as the most earliest
+                if (connection->first_ack_time == utils::timepoint(utils::duration(0)))
+                    connection->first_ack_time = std::chrono::steady_clock::now();
             }
             break;
         }
