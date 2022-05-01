@@ -222,14 +222,26 @@ uint64_t QUIC::SendData([[maybe_unused]] uint64_t sequence,
                         [[maybe_unused]] bool FIN) {
     utils::logger::info("sendData, streamID is {}, offset is {}", streamID, this->streamID2Offset[streamID]);
     auto this_connection = this->connections[sequence];
-    // thquic::ConnectionID connection_id = this->connections[sequence]
-    // while(len > 1370)
-    // {
-    //     std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(this->SrcID2DstID[this->Sequence2ID[sequence]], this->pktnum++, this_connection->getLargestAcked());
-
-    // }
+    uint8_t *buffer = buf.release();
+    while(len > MAX_SLICE_LENGTH)
+    {
+        std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(this->SrcID2DstID[this->Sequence2ID[sequence]], this->pktnum++, this_connection->getLargestAcked());
+        std::unique_ptr<uint8_t[]> tmp = std::make_unique<uint8_t[]>(MAX_SLICE_LENGTH);
+        std::copy(buffer, buffer + MAX_SLICE_LENGTH, tmp.get());
+        std::shared_ptr<payload::StreamFrame> stream_frame = std::make_shared<payload::StreamFrame>(streamID, std::move(tmp), MAX_SLICE_LENGTH, this->streamID2Offset[streamID], MAX_SLICE_LENGTH, FIN);
+        this->streamID2Offset[streamID] += MAX_SLICE_LENGTH;
+        buffer += MAX_SLICE_LENGTH;
+        len -= MAX_SLICE_LENGTH;
+        std::shared_ptr<payload::Payload> stream_payload = std::make_shared<payload::Payload>();
+        stream_payload->AttachFrame(stream_frame);
+        sockaddr_in addrTo = this->connections[sequence]->getAddrTo();
+        std::shared_ptr<payload::Packet> stream_packet = std::make_shared<payload::Packet>(header, stream_payload, addrTo);
+        this_connection->insertIntoPending(stream_packet);
+    }
     std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(this->SrcID2DstID[this->Sequence2ID[sequence]], this->pktnum++, this_connection->getLargestAcked());
-    std::shared_ptr<payload::StreamFrame> stream_frame = std::make_shared<payload::StreamFrame>(streamID, std::move(buf), len, this->streamID2Offset[streamID], len, FIN);
+    std::unique_ptr<uint8_t[]> tmp = std::make_unique<uint8_t[]>(len);
+    std::copy(buffer, buffer + len, tmp.get());
+    std::shared_ptr<payload::StreamFrame> stream_frame = std::make_shared<payload::StreamFrame>(streamID, std::move(tmp), len, this->streamID2Offset[streamID], len, FIN);
     this->streamID2Offset[streamID] += len;
     std::shared_ptr<payload::Payload> stream_payload = std::make_shared<payload::Payload>();
     stream_payload->AttachFrame(stream_frame);
@@ -263,6 +275,7 @@ std::shared_ptr<utils::UDPDatagram> QUIC::encodeDatagram(
     return std::make_shared<utils::UDPDatagram>(stream, pkt->GetAddrSrc(),
                                                 pkt->GetAddrDst(), 0);
 }
+
 
 
 void QUIC::handleACKFrame(std::shared_ptr<payload::ACKFrame> ackFrame, uint64_t sequence) {
@@ -300,13 +313,18 @@ void QUIC::handleACKFrame(std::shared_ptr<payload::ACKFrame> ackFrame, uint64_t 
             // change tracking interval
             std::shared_ptr<thquic::payload::Packet> packet = connection->getUnAckedPacket(packetNumber);
             if(packet == nullptr) continue;
-            this->connections[sequence]->bytesInFlight -= packet->EncodeLen();
-            if (this->connections[sequence]->status == 0) {
-                this->connections[sequence]->congestionWindow += packet->EncodeLen();
-            } else if (this->connections[sequence]->status == 1) {
-                // skip
-            } else if (this->connections[sequence]->status == 2) {
-                this->connections[sequence]->congestionWindow += MAX_SLICE_LENGTH * 
+            if (packet->IsByteInflight()) {
+                this->connections[sequence]->bytesInFlight -= packet->EncodeLen();
+                // if (this->inCongestionRecovery(sequence, packet->GetSendTimestamp())) {
+                if (std::chrono::duration_cast<std::chrono::milliseconds>(packet->GetSendTimestamp().time_since_epoch()).count() >= std::chrono::duration_cast<std::chrono::microseconds>(this->connections[sequence]->recoveryStartTime.time_since_epoch()).count()) {
+                    // pass
+                } else {
+                    if (this->connections[sequence]->congestionWindow < this->connections[sequence]->ssthreshold) {
+                        this->connections[sequence]->congestionWindow += packet->EncodeLen();
+                    } else {
+                        this->connections[sequence]->congestionWindow += MAX_SLICE_LENGTH * packet->EncodeLen() / this->connections[sequence]->congestionWindow;
+                    }
+                }
             }
             for (auto frame : packet->GetPktPayload()->GetFrames()) {
                 if(frame->Type() == payload::FrameType::ACK) {
@@ -323,6 +341,30 @@ void QUIC::handleACKFrame(std::shared_ptr<payload::ACKFrame> ackFrame, uint64_t 
     if (largestAcked > connection->getLargestAcked()) connection->setLargestAcked(largestAcked);
 }
 
+void QUIC::onPacktsLost(std::list<std::shared_ptr<payload::Packet>> lostPackets, int sequence){
+    auto now = std::chrono::steady_clock::now();
+    long int sentTimeOfLastLoss = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+    for (auto lostPacket : lostPackets) {
+        if (lostPacket->IsByteInflight()){
+            this->connections[sequence]->bytesInFlight -= lostPacket->EncodeLen();
+            if (std::chrono::duration_cast<std::chrono::milliseconds>(lostPacket->GetSendTimestamp().time_since_epoch()).count()-sentTimeOfLastLoss < 0) {
+                sentTimeOfLastLoss = std::chrono::duration_cast<std::chrono::milliseconds>(lostPacket->GetSendTimestamp().time_since_epoch()).count();
+            }
+        }
+    }
+    if (sentTimeOfLastLoss != std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count()) {
+        this->enterRecovery(sentTimeOfLastLoss, sequence);
+    }
+}
+
+void QUIC::enterRecovery(long int sentTimeOfLastLoss, int sequence) {
+    if (sentTimeOfLastLoss >= std::chrono::duration_cast<std::chrono::milliseconds>(this->connections[sequence]->recoveryStartTime.time_since_epoch()).count())
+        return;
+    this->connections[sequence]->recoveryStartTime = std::chrono::steady_clock::now();
+    this->connections[sequence]->ssthreshold /=2;
+    this->connections[sequence]->congestionWindow = std::max(this->connections[sequence]->ssthreshold, this->connections[sequence]->minWindowSize);
+    
+}
 
 int QUICClient::incomingMsg(
     [[maybe_unused]] std::unique_ptr<utils::UDPDatagram> datagram) {

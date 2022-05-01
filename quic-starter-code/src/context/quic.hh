@@ -46,9 +46,9 @@ class QUIC {
 
     int SetStreamDataReadyCallback(uint64_t sequence, uint64_t streamID,
                                    StreamDataReadyCallbackType callback);
-
+    void enterRecovery(long int sentTimeOfLastLoss, int sequence);
+    void onPacktsLost(std::list<std::shared_ptr<payload::Packet>> lostPackets, int sequence);
     int SocketLoop();
-
    protected:
     static std::shared_ptr<utils::UDPDatagram> encodeDatagram(
         const std::shared_ptr<payload::Packet>& pkt);

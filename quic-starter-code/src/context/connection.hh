@@ -16,7 +16,7 @@ class Connection {
         this->ACKRanges = utils::IntervalSet();
         this->chunkStream = utils::ChunkStream();
         this->congestionWindow = 14720;
-        this->ssthreshold = 2147483647*2147483647;
+        this->ssthreshold = uint64_t(2147483647)*uint64_t(2147483647);
         this->bytesInFlight = 0;
         this->recoveryStartTime = std::chrono::steady_clock::now();
     }
@@ -115,6 +115,7 @@ public:
     uint64_t bytesInFlight;
     std::chrono::steady_clock::time_point recoveryStartTime;
     uint64_t status = 0; // 0 is slow start, 1 is recovery, 2 is avoidance
+    uint64_t minWindowSize = 2*MAX_SLICE_LENGTH;
 };
 
 }  // namespace thquic::context
