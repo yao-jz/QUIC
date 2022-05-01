@@ -158,15 +158,28 @@ int QUIC::SocketLoop() {
         for (auto& connection : this->connections) {
             if (!connection.second->getIsAlive()) continue;
             auto& pendingPackets = this->getPackets(connection.second);
-            // auto& pendingPackets = connection.second->GetPendingPackets();
             while (!pendingPackets.empty()) {
-                std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
-                utils::logger::info("SEND A PACKET, NUMBER = {}", pendingPackets.front()->GetPacketNumber());
-                pendingPackets.front()->MarkSendTimestamp(now);
-                auto newDatagram = QUIC::encodeDatagram(pendingPackets.front());
-                this->socket.sendMsg(newDatagram);
-                if(pendingPackets.front()->IsACKEliciting()) connection.second->insertIntoUnAckedPackets(pendingPackets.front()->GetPacketNumber(), pendingPackets.front());
-                pendingPackets.pop_front();
+                bool okToSend= false;
+                if (pendingPackets.front()->IsByteInflight()) {
+                    if (pendingPackets.front()->EncodeLen() + connection.second->bytesInFlight < connection.second->congestionWindow){
+                        // smaller than congestion window, it's ok to send this package
+                        okToSend = true;
+                    } else { // larger than congestion window
+                        okToSend = false;
+                    }
+                } else {
+                    okToSend = true;
+                }
+                if (okToSend) {
+                    utils::logger::info("SEND A PACKET, NUMBER = {}", pendingPackets.front()->GetPacketNumber());
+                    std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+                    pendingPackets.front()->MarkSendTimestamp(now);
+                    auto newDatagram = QUIC::encodeDatagram(pendingPackets.front());
+                    this->socket.sendMsg(newDatagram);
+                    connection.second->bytesInFlight += pendingPackets.front()->EncodeLen();
+                    if(pendingPackets.front()->IsACKEliciting()) connection.second->insertIntoUnAckedPackets(pendingPackets.front()->GetPacketNumber(), pendingPackets.front());
+                    pendingPackets.pop_front();
+                }
             }
         }
     }
@@ -287,6 +300,14 @@ void QUIC::handleACKFrame(std::shared_ptr<payload::ACKFrame> ackFrame, uint64_t 
             // change tracking interval
             std::shared_ptr<thquic::payload::Packet> packet = connection->getUnAckedPacket(packetNumber);
             if(packet == nullptr) continue;
+            this->connections[sequence]->bytesInFlight -= packet->EncodeLen();
+            if (this->connections[sequence]->status == 0) {
+                this->connections[sequence]->congestionWindow += packet->EncodeLen();
+            } else if (this->connections[sequence]->status == 1) {
+                // skip
+            } else if (this->connections[sequence]->status == 2) {
+                this->connections[sequence]->congestionWindow += MAX_SLICE_LENGTH * 
+            }
             for (auto frame : packet->GetPktPayload()->GetFrames()) {
                 if(frame->Type() == payload::FrameType::ACK) {
                     std::shared_ptr<payload::ACKFrame> subFrame = std::static_pointer_cast<payload::ACKFrame>(frame);
@@ -315,12 +336,6 @@ int QUICClient::incomingMsg(
     std::shared_ptr<Connection> connection;
     if (!(this->connections.find(sequence) == this->connections.end())) {
         connection = this->connections.find(sequence)->second;
-        // if (!connection->getIsAlive()) {
-        //     utils::logger::warn("CONNECTION {} ALREADY CLOSED!", sequence);
-        //     this->CloseConnection(sequence, "", 0);
-        //     this->ConnectionCloseCallback(sequence, "", 0);
-        //     return 0;
-        // }
     }
 
     switch (packetType) {
@@ -393,6 +408,7 @@ int QUICClient::incomingMsg(
                             this->CloseConnection(sequence, "", 0);
                             utils::logger::warn("CONNECTION {} ALREADY CLOSED!", sequence);
                         }
+                        
                         break;
                     }
                     case payload::FrameType::PING:{

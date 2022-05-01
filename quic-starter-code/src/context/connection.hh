@@ -15,6 +15,10 @@ class Connection {
         this->largestAcked = 0;
         this->ACKRanges = utils::IntervalSet();
         this->chunkStream = utils::ChunkStream();
+        this->congestionWindow = 14720;
+        this->ssthreshold = 2147483647*2147483647;
+        this->bytesInFlight = 0;
+        this->recoveryStartTime = std::chrono::steady_clock::now();
     }
 
     std::list<std::shared_ptr<payload::Packet>>& GetPendingPackets() {
@@ -106,6 +110,11 @@ public:
     bool initial_complete = false;
     int sequence;
     utils::ChunkStream chunkStream;
+    uint64_t congestionWindow;
+    uint64_t ssthreshold;
+    uint64_t bytesInFlight;
+    std::chrono::steady_clock::time_point recoveryStartTime;
+    uint64_t status = 0; // 0 is slow start, 1 is recovery, 2 is avoidance
 };
 
 }  // namespace thquic::context
