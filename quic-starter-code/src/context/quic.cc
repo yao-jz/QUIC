@@ -117,6 +117,7 @@ void QUIC::detectLossAndRetransmisson(std::shared_ptr<Connection> connection, st
     for(auto packet_pair : unAckedPackets) {
         std::shared_ptr<payload::Packet> packet = packet_pair.second;
         // we don't think it is lost
+        if(packet->IsACKEliciting()) continue;
         if(packet->GetPacketNumber() > connection->getLargestAcked()) continue;
         utils::timepoint sendTime = packet_pair.second->GetSendTimestamp();
         // packet loss when: (1) packet number < largest acked - kPackethreshold (2) timeSent < now - timeThreshold
@@ -247,7 +248,8 @@ int QUIC::SocketLoop() {
                     auto newDatagram = QUIC::encodeDatagram(pendingPackets.front());
                     this->socket.sendMsg(newDatagram);
                     connection.second->bytesInFlight += pendingPackets.front()->EncodeLen();
-                    if(pendingPackets.front()->IsACKEliciting()) connection.second->insertIntoUnAckedPackets(pendingPackets.front()->GetPacketNumber(), pendingPackets.front());
+                    // if(pendingPackets.front()->IsACKEliciting()) connection.second->insertIntoUnAckedPackets(pendingPackets.front()->GetPacketNumber(), pendingPackets.front());
+                    connection.second->insertIntoUnAckedPackets(pendingPackets.front()->GetPacketNumber(), pendingPackets.front());
                     pendingPackets.pop_front();
                 }
             }
