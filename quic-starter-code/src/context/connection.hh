@@ -4,8 +4,6 @@
 #include "payload/packet.hh"
 #include <map>
 
-#define K_INITIAL_RTT 333
-#define MAX_ACK_DELAY 20
 namespace thquic::context {
 
 class Connection {
@@ -86,7 +84,7 @@ class Connection {
         return this->largestAcked;
     }
 
-    utils::IntervalSet& getACKRanges(){
+    utils::IntervalSet& getACKRanges() {
         return this->ACKRanges;
     }
 
@@ -106,17 +104,18 @@ private:
     std::list<std::shared_ptr<payload::Packet>> pendingPackets;
     std::map<uint64_t,std::shared_ptr<payload::Packet>> unAckedPackets; // packetnum to packet
     struct sockaddr_in addrTo;
-    uint64_t largestAcked;
+    uint64_t largestAcked = std::numeric_limits<uint64_t>::max();
     utils::IntervalSet ACKRanges;
 public:
     // RTT estimation relative
-    uint64_t smoothed_rtt = K_INITIAL_RTT;
-    uint64_t first_rtt_sample = 0;
-    uint64_t latest_rtt = 0;
-    uint64_t min_rtt = 0;
-    uint64_t rttvar = K_INITIAL_RTT / 2;
+    utils::duration smoothed_rtt = config::loss_detection::INITIAL_RTT;
+    utils::duration first_rtt_sample = std::chrono::milliseconds(0);
+    utils::duration latest_rtt = std::chrono::milliseconds(0);
+    utils::duration min_rtt = std::chrono::milliseconds(0);
+    utils::duration rttvar = config::loss_detection::INITIAL_RTT / 2;
     std::set<uint64_t> aliveStreams;
     std::map<uint64_t, std::chrono::steady_clock::time_point> packetRecvTime;
+    std::chrono::steady_clock::time_point first_ack_time = std::chrono::steady_clock::time_point(std::chrono::milliseconds(0));
     std::chrono::steady_clock::time_point last_ping;
     std::chrono::steady_clock::time_point last_initial;
     bool initial_complete = false;
@@ -127,9 +126,8 @@ public:
     uint64_t bytesInFlight;
     std::chrono::steady_clock::time_point recoveryStartTime;
     uint64_t status = 0; // 0 is slow start, 1 is recovery, 2 is avoidance
-    uint64_t minWindowSize = 2*MAX_SLICE_LENGTH;
     std::list<std::shared_ptr<payload::Packet>> packetsBuffer;
+    uint64_t minWindowSize = 2 * MAX_SLICE_LENGTH;
 };
-
 }  // namespace thquic::context
 #endif

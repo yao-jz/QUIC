@@ -16,10 +16,8 @@
 #include "utils/socket.hh"
 #include "utils/time.hh"
 
-#define INITIAL_INTERVAL 1000
-#define K_PACKET_THRESHOLD 3
+#define INITIAL_INTERVAL 2000
 #define K_TIME_THRESHOLD(x) 9 * x / 8
-#define K_GRANULARITY 1
 
 namespace thquic::context {
 
