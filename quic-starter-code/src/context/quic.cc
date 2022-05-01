@@ -46,57 +46,27 @@ int QUIC::SetConnectionCloseCallback(
     return 0;
 }
 
-std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<thquic::context::Connection> connection)
-{
-    std::map<uint64_t,std::shared_ptr<payload::Packet>>& unAckedPackets = connection->getUnAckedPackets();
-    std::list<std::shared_ptr<payload::Packet>>& pendingPackets = connection->GetPendingPackets();
-    std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
-
-    if (!connection->initial_complete && std::chrono::duration_cast<std::chrono::milliseconds>(now-connection->last_initial).count() > 1000) {
+/**
+ * @brief 判断是否要发送Initial 包
+ * @param connection 
+ */
+void QUIC::checkInitialPacket(std::shared_ptr<Connection> connection, std::chrono::steady_clock::time_point& now){
+    // periodically send Initial packet
+    if (!connection->initial_complete && std::chrono::duration_cast<std::chrono::milliseconds>(now - connection->last_initial).count() > INITIAL_INTERVAL) {
         std::shared_ptr<payload::Initial> initial_header = std::make_shared<payload::Initial>(config::QUIC_VERSION, this->Sequence2ID[connection->sequence], ConnectionID(), this->pktnum++, connection->getLargestAcked());
         std::shared_ptr<payload::Payload> initial_payload = std::make_shared<payload::Payload>();
         std::shared_ptr<payload::Packet> initial_packet = std::make_shared<payload::Packet>(initial_header, initial_payload, connection->getAddrTo());
-        // connection->last_ping = std::chrono::steady_clock::now();
         connection->last_initial = std::chrono::steady_clock::now();
         connection->insertIntoPending(initial_packet);
     }
+}
 
-    // restransmisson when time's up
-    std::vector<uint64_t> packetNumsDel;
-    for(auto packet_pair : unAckedPackets) {
-        std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
-        if(std::chrono::duration_cast<std::chrono::milliseconds>(now - packet_pair.second->GetSendTimestamp()).count() > 7500) {
-            // ignore RETRY packet
-            std::shared_ptr<payload::Packet> unAckedPacket = packet_pair.second;
-            auto frames = unAckedPacket->GetPktPayload()->GetFrames();
-            for(auto frame = frames.begin(); frame != frames.end() ; frame ++)
-            {
-                if((*frame)->Type() == payload::FrameType::ACK)
-                {
-                    unAckedPacket->DeletePayloadFrame(std::distance(frames.begin(), frame));
-                    break;
-                }
-            }
-            std::shared_ptr<payload::PacketNumberMixin> mixin = std::dynamic_pointer_cast<payload::PacketNumberMixin>(unAckedPacket->GetPktHeader());
-            utils::logger::warn("PACKET LOST, NUMBER = {}", unAckedPacket->GetPacketNumber());
-            uint64_t full = this->pktnum++;
-            // reencode the packet number (because the length field may be changed)
-            utils::TruncatedPacketNumber truncated = utils::encodePacketNumber(full, connection->getLargestAcked());
-            mixin->ChangeTruncatedPacketNumber(truncated.first, truncated.second);
-            mixin->ChangeFullPacketNumber(full);
-            connection->insertIntoPending(unAckedPacket);
-            packetNumsDel.push_back(packet_pair.first);
-        }
-    }
-
-    // 不再接受重传之前的包的ack
-    for(auto packetnum : packetNumsDel) {
-        connection->removeFromUnAckedPackets(packetnum);
-    }
-
-    // // 判断是否要发送ping
-    now = std::chrono::steady_clock::now();
-    // // ping的间隔时间
+/**
+ * @brief 判断是否要发送ping包
+ * @param connection 需要检查的连接
+ */
+void QUIC::checkPingPacket(std::shared_ptr<Connection> connection, std::chrono::steady_clock::time_point& now){
+    // ping的间隔时间
     if (std::chrono::duration_cast<std::chrono::milliseconds>(now - connection->last_ping).count() > 1000) {
         // 开始发送PING frame
         utils::logger::info("sending PING FRAME...");
@@ -109,6 +79,74 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
         connection->last_ping = now;
         connection->insertIntoPending(ping_packet);
     }
+}
+
+/**
+ * @brief 检查是否有包已经丢失，需要进行重传
+ * @param connection 
+ */
+void QUIC::detectLossAndRetransmisson(std::shared_ptr<Connection> connection, std::chrono::steady_clock::time_point& now) {
+    // get unacked packets sent by this connection
+    std::map<uint64_t,std::shared_ptr<payload::Packet>>& unAckedPackets = connection->getUnAckedPackets();
+    uint64_t rawThreshold = K_TIME_THRESHOLD(connection->latest_rtt > connection->smoothed_rtt ? connection->latest_rtt : connection->smoothed_rtt);
+    uint64_t timeThreshold = (std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() 
+            - (rawThreshold > K_GRANULARITY ? rawThreshold : K_GRANULARITY));
+    uint64_t pktThreshold = (connection->getLargestAcked() > K_PACKET_THRESHOLD) ? 
+            connection->getLargestAcked() - K_PACKET_THRESHOLD : 0;
+    std::vector<uint64_t> packetNumsDel;
+    for(auto packet_pair : unAckedPackets) {
+        std::shared_ptr<payload::Packet> packet = packet_pair.second;
+        // we don't think it is lost
+        if(packet->GetPacketNumber() > connection->getLargestAcked()) continue;
+        uint64_t sendTime = std::chrono::duration_cast<std::chrono::milliseconds>(packet_pair.second->GetSendTimestamp().time_since_epoch()).count();
+        // packet loss when: (1) packet number < largest acked - kPackethreshold (2) timeSent < now - timeThreshold
+        if (packet->GetPacketNumber() < pktThreshold || sendTime < timeThreshold) {
+            utils::logger::warn("PACKET LOST, NUMBER = {}", packet->GetPacketNumber());
+            // ignore ping & padding packet
+            auto frames = packet->GetPktPayload()->GetFrames();
+            // remove old ACK Frames
+            for(auto frame = frames.begin(); frame != frames.end() ; frame ++) {
+                switch ((*frame)->Type()) {
+                    case payload::FrameType::ACK:
+                    case payload::FrameType::PING:
+                    case payload::FrameType::PADDING:{
+                        packet->DeletePayloadFrame(std::distance(frames.begin(), frame));
+                        break;
+                    }
+                    default:
+                        break;
+                }
+            }
+            if (!packet->GetPktPayload()->GetFrames().empty()) {
+                std::shared_ptr<payload::PacketNumberMixin> mixin = std::dynamic_pointer_cast<payload::PacketNumberMixin>(packet->GetPktHeader());
+                uint64_t full = this->pktnum++;
+                // reencode the packet number (because the length field may be changed)
+                utils::TruncatedPacketNumber truncated = utils::encodePacketNumber(full, connection->getLargestAcked());
+                mixin->ChangeTruncatedPacketNumber(truncated.first, truncated.second);
+                mixin->ChangeFullPacketNumber(full);
+                connection->insertIntoPending(packet);
+            }
+            packetNumsDel.push_back(packet_pair.first);
+        }
+    }
+    // discard lost packets
+    for(auto packetnum : packetNumsDel) {
+        connection->removeFromUnAckedPackets(packetnum);
+    }
+}
+
+std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<thquic::context::Connection> connection)
+{
+    std::list<std::shared_ptr<payload::Packet>>& pendingPackets = connection->GetPendingPackets();
+    std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+
+    this->checkInitialPacket(connection, now);
+
+    // check if there's loss and retransmission
+    this->detectLossAndRetransmisson(connection, now);
+
+    // check if ping frame needed
+    this->checkPingPacket(connection, now);
 
     // 有即将发送的包，顺带发送ack
     if(!pendingPackets.empty() && !connection->getACKRanges().Empty())
