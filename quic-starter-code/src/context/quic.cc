@@ -379,7 +379,7 @@ void QUIC::handleACKFrame(std::shared_ptr<payload::ACKFrame> ackFrame, uint64_t 
     if (largestAcked > connection->getLargestAcked()) connection->setLargestAcked(largestAcked);
 }
 
-void QUIC::onPacktsLost(std::list<std::shared_ptr<payload::Packet>> lostPackets, int sequence){
+void QUIC::onPacketsLost(std::list<std::shared_ptr<payload::Packet>> lostPackets, int sequence){
     auto now = std::chrono::steady_clock::now();
     long int sentTimeOfLastLoss = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
     for (auto lostPacket : lostPackets) {
