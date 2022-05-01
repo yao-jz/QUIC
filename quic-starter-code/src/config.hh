@@ -16,6 +16,8 @@ constexpr uint32_t QUIC_VERSION = 0x00000001;
 constexpr uint64_t UDP_MAX_BODY = 1472;
 constexpr utils::clock::duration MAX_ACK_DELAY = 25ms;
 constexpr utils::clock::duration PING_INTERVAL = 2s;
+constexpr utils::duration ZERO_DURATION = std::chrono::milliseconds(0);
+constexpr utils::timepoint ZERO_TIMEPOINT = utils::timepoint(ZERO_DURATION);
 
 namespace loss_detection {
 constexpr uint64_t PACKET_THRESHOLD = 3;
