@@ -569,6 +569,7 @@ int QUICServer::incomingMsg(
                 connection->setAlive(true);
                 connection->initial_complete = true;
                 sequence = this->connectionSequence++;
+                connection->sequence = sequence;
                 this->connections[sequence] = connection;
                 this->Sequence2ID[sequence] = id; 
                 this->ID2Sequence[id] = sequence;
