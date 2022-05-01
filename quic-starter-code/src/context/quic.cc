@@ -50,7 +50,7 @@ int QUIC::SetConnectionCloseCallback(
  * @brief 判断是否要发送Initial 包
  * @param connection 
  */
-void QUIC::checkInitialPacket(std::shared_ptr<Connection> connection, std::chrono::steady_clock::time_point& now){
+void QUIC::checkInitialPacket(std::shared_ptr<Connection> connection, utils::timepoint& now){
     // periodically send Initial packet
     if (!connection->initial_complete && std::chrono::duration_cast<std::chrono::milliseconds>(now - connection->last_initial).count() > INITIAL_INTERVAL) {
         std::shared_ptr<payload::Initial> initial_header = std::make_shared<payload::Initial>(config::QUIC_VERSION, this->Sequence2ID[connection->sequence], ConnectionID(), this->pktnum++, connection->getLargestAcked());
@@ -65,7 +65,7 @@ void QUIC::checkInitialPacket(std::shared_ptr<Connection> connection, std::chron
  * @brief 判断是否要发送ping包
  * @param connection 需要检查的连接
  */
-void QUIC::checkPingPacket(std::shared_ptr<Connection> connection, std::chrono::steady_clock::time_point& now){
+void QUIC::checkPingPacket(std::shared_ptr<Connection> connection, utils::timepoint& now){
     // ping的间隔时间
     if (now - connection->last_ping > config::PING_INTERVAL) {
         // 开始发送PING frame
@@ -105,7 +105,7 @@ void QUIC::checkBufferPacket(std::shared_ptr<Connection> connection)
  * @brief 检查是否有包已经丢失，需要进行重传
  * @param connection 
  */
-void QUIC::detectLossAndRetransmisson(std::shared_ptr<Connection> connection, std::chrono::steady_clock::time_point& now) {
+void QUIC::detectLossAndRetransmisson(std::shared_ptr<Connection> connection, utils::timepoint& now) {
     // get unacked packets sent by this connection
     std::map<uint64_t,std::shared_ptr<payload::Packet>>& unAckedPackets = connection->getUnAckedPackets();
     utils::duration rawThreshold = K_TIME_THRESHOLD((connection->latest_rtt > connection->smoothed_rtt ? connection->latest_rtt : connection->smoothed_rtt));
@@ -161,7 +161,7 @@ void QUIC::detectLossAndRetransmisson(std::shared_ptr<Connection> connection, st
 
 std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<thquic::context::Connection> connection)
 {
-    std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+    utils::timepoint now = std::chrono::steady_clock::now();
 
     // check if initial packet needed
     this->checkInitialPacket(connection, now);
@@ -180,6 +180,7 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
     if(!connection->getACKRanges().Empty()) {
         uint64_t pktNumber = connection->getACKRanges().GetEnd();
         uint64_t delay = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - connection->packetRecvTime.find(pktNumber)->second).count();
+        utils::logger::info("PENDING ACK HAS BEEN DELAYED FOR {} ms", delay);
         if (!pendingPackets.empty()) {
             std::shared_ptr<payload::Packet> packet = pendingPackets.front();
             auto frames = packet->GetPktPayload()->GetFrames();
@@ -211,9 +212,7 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
                 pendingPackets.push_back(packet);
             }
         }
-        
         connection->packetRecvTime.clear();
-        
     }
     return pendingPackets;
 }
@@ -243,7 +242,7 @@ int QUIC::SocketLoop() {
                 }
                 if (okToSend) {
                     utils::logger::info("SEND A PACKET, NUMBER = {}", pendingPackets.front()->GetPacketNumber());
-                    std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+                    utils::timepoint now = std::chrono::steady_clock::now();
                     pendingPackets.front()->MarkSendTimestamp(now);
                     auto newDatagram = QUIC::encodeDatagram(pendingPackets.front());
                     this->socket.sendMsg(newDatagram);
@@ -363,20 +362,21 @@ void QUIC::handleACKFrame(std::shared_ptr<payload::ACKFrame> ackFrame, uint64_t 
         utils::duration ack_delay = std::chrono::milliseconds(ackFrame->GetACKDelay());
         if (ack_delay < config::MAX_ACK_DELAY) ack_delay = config::MAX_ACK_DELAY;
         connection->latest_rtt = std::chrono::steady_clock::now() - latestPacket->GetSendTimestamp();
-        if (connection->first_rtt_sample == std::chrono::milliseconds(0)) {
+        utils::logger::info("PATH TRIP DELAY: {}", utils::formatTimeDuration(connection->latest_rtt));
+        if (connection->first_rtt_sample == utils::timepoint(std::chrono::milliseconds(0))) {
             connection->min_rtt = connection->latest_rtt;
             connection->smoothed_rtt = connection->latest_rtt;
             connection->rttvar = connection->latest_rtt / 2;
-            connection->first_rtt_sample = std::chrono::milliseconds(1);
+            connection->first_rtt_sample = utils::clock::now();
         }
         else {
-            connection->min_rtt = connection->min_rtt < connection->latest_rtt ? connection->min_rtt : connection->latest_rtt;
+            connection->min_rtt = (connection->min_rtt < connection->latest_rtt) ? connection->min_rtt : connection->latest_rtt;
             // TODO: Handshake
             utils::duration adjusted_rtt = connection->latest_rtt;
             if (connection->latest_rtt > connection->min_rtt + ack_delay){
                 adjusted_rtt = connection->latest_rtt - ack_delay;
             }
-            utils::duration diff = connection->smoothed_rtt > adjusted_rtt ? connection->smoothed_rtt - adjusted_rtt : adjusted_rtt - connection->smoothed_rtt;
+            utils::duration diff = (connection->smoothed_rtt > adjusted_rtt) ? (connection->smoothed_rtt - adjusted_rtt) : (adjusted_rtt - connection->smoothed_rtt);
             connection->rttvar = 3 * connection->rttvar / 4 + diff / 4;
             connection->smoothed_rtt = 7 * connection->smoothed_rtt / 8 + adjusted_rtt / 8;
         }
@@ -580,7 +580,7 @@ int QUICServer::incomingMsg(
     }
     
     payload::PacketType packetType = header->Type();
-    std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+    utils::timepoint now = std::chrono::steady_clock::now();
 
     switch (packetType) {
         case payload::PacketType::INITIAL: {
