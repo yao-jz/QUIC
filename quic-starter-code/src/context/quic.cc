@@ -86,7 +86,7 @@ void QUIC::checkBufferPacket(std::shared_ptr<Connection> connection)
 {
     if(connection->GetPendingPackets().size() < 10)
     {
-        for(size_t i = 0; i < 10 - connection->GetPendingPackets().size(); i ++)
+        for(size_t i = 1; i < 10 - connection->GetPendingPackets().size(); i ++)
         {
             if(connection->packetsBuffer.size() == 0) break;
             std::shared_ptr<payload::Packet> packet = connection->packetsBuffer.front();
@@ -117,6 +117,7 @@ void QUIC::detectLossAndRetransmisson(std::shared_ptr<Connection> connection, ut
     for(auto packet_pair : unAckedPackets) {
         std::shared_ptr<payload::Packet> packet = packet_pair.second;
         // we don't think it is lost
+        if(packet->IsACKEliciting()) continue;
         if(packet->GetPacketNumber() > connection->getLargestAcked()) continue;
         utils::timepoint sendTime = packet_pair.second->GetSendTimestamp();
         // packet loss when: (1) packet number < largest acked - kPackethreshold (2) timeSent < now - timeThreshold
@@ -246,7 +247,8 @@ int QUIC::SocketLoop() {
                     auto newDatagram = QUIC::encodeDatagram(pendingPackets.front());
                     this->socket.sendMsg(newDatagram);
                     connection.second->bytesInFlight += pendingPackets.front()->EncodeLen();
-                    if(pendingPackets.front()->IsACKEliciting()) connection.second->insertIntoUnAckedPackets(pendingPackets.front()->GetPacketNumber(), pendingPackets.front());
+                    // if(pendingPackets.front()->IsACKEliciting()) connection.second->insertIntoUnAckedPackets(pendingPackets.front()->GetPacketNumber(), pendingPackets.front());
+                    connection.second->insertIntoUnAckedPackets(pendingPackets.front()->GetPacketNumber(), pendingPackets.front());
                     pendingPackets.pop_front();
                 }
             }
@@ -307,7 +309,6 @@ uint64_t QUIC::SendData([[maybe_unused]] uint64_t sequence,
         std::shared_ptr<payload::Packet> stream_packet = std::make_shared<payload::Packet>(header, stream_payload, addrTo);
         this_connection->insertIntoBuffer(stream_packet);
     }
-    std::cout<<this_connection->getLargestAcked()<<std::endl;
     std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(this->SrcID2DstID[this->Sequence2ID[sequence]], this->pktnum, this_connection->getLargestAcked());
     std::unique_ptr<uint8_t[]> tmp = std::make_unique<uint8_t[]>(len);
     std::copy(buffer, buffer + len, tmp.get());
@@ -479,7 +480,6 @@ int QUICClient::incomingMsg(
             utils::logger::info("RECV A PACKET FROM SERVER, PACKET NUMBER: {}", recvPacketNumber);
             uint64_t sequence = this->ID2Sequence[header->GetDstID()];
             bool ackEliciting = false;
-            std::cout<<"bufferLen = "<<bufferLen<<std::endl;
             std::list<std::shared_ptr<payload::Frame>> frames = payload::Payload(stream, bufferLen - stream.Pos()).GetFrames();
             for (auto frame : frames) {
                 switch (frame->Type()) {
@@ -542,8 +542,8 @@ int QUICClient::incomingMsg(
                     default: utils::logger::warn("UNKNOWN FRAME TYPE");
                 }
             }
+            connection->getACKRanges().AddInterval(recvPacketNumber, recvPacketNumber);
             if (ackEliciting) {
-                connection->getACKRanges().AddInterval(recvPacketNumber, recvPacketNumber);
                 // mark as the most earliest
                 if (connection->first_ack_time == config::ZERO_TIMEPOINT)
                     connection->first_ack_time = utils::clock::now();
@@ -703,8 +703,8 @@ int QUICServer::incomingMsg(
                     default: utils::logger::warn("UNKNOWN FRAME TYPE");
                 }
             }
+            connection->getACKRanges().AddInterval(recvPacketNumber, recvPacketNumber);
             if (ackEliciting) {
-                connection->getACKRanges().AddInterval(recvPacketNumber, recvPacketNumber);
                  // mark as the most earliest
                 if (connection->first_ack_time == config::ZERO_TIMEPOINT)
                     connection->first_ack_time = utils::clock::now();
