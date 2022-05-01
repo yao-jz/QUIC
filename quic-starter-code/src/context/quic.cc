@@ -94,6 +94,7 @@ void QUIC::detectLossAndRetransmisson(std::shared_ptr<Connection> connection, st
     uint64_t pktThreshold = (connection->getLargestAcked() > K_PACKET_THRESHOLD) ? 
             connection->getLargestAcked() - K_PACKET_THRESHOLD : 0;
     std::vector<uint64_t> packetNumsDel;
+    std::list<std::shared_ptr<payload::Packet>> lostPackets;
     for(auto packet_pair : unAckedPackets) {
         std::shared_ptr<payload::Packet> packet = packet_pair.second;
         // we don't think it is lost
@@ -103,6 +104,7 @@ void QUIC::detectLossAndRetransmisson(std::shared_ptr<Connection> connection, st
         if (packet->GetPacketNumber() < pktThreshold || sendTime < timeThreshold) {
             utils::logger::warn("PACKET LOST, NUMBER = {}", packet->GetPacketNumber());
             // ignore ping & padding packet
+            lostPackets.push_back(std::make_shared<payload::Packet>(*packet));
             auto frames = packet->GetPktPayload()->GetFrames();
             // remove old ACK Frames
             for(auto frame = frames.begin(); frame != frames.end() ; frame ++) {
@@ -129,6 +131,9 @@ void QUIC::detectLossAndRetransmisson(std::shared_ptr<Connection> connection, st
             packetNumsDel.push_back(packet_pair.first);
         }
     }
+
+    this->onPacketsLost(lostPackets, connection->sequence);
+
     // discard lost packets
     for(auto packetnum : packetNumsDel) {
         connection->removeFromUnAckedPackets(packetnum);
@@ -137,7 +142,6 @@ void QUIC::detectLossAndRetransmisson(std::shared_ptr<Connection> connection, st
 
 std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<thquic::context::Connection> connection)
 {
-    std::list<std::shared_ptr<payload::Packet>>& pendingPackets = connection->GetPendingPackets();
     std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
 
     this->checkInitialPacket(connection, now);
@@ -147,6 +151,8 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
 
     // check if ping frame needed
     this->checkPingPacket(connection, now);
+
+    std::list<std::shared_ptr<payload::Packet>>& pendingPackets = connection->GetPendingPackets();
 
     // 有即将发送的包，顺带发送ack
     if(!pendingPackets.empty() && !connection->getACKRanges().Empty())
@@ -204,6 +210,7 @@ int QUIC::SocketLoop() {
                         okToSend = true;
                     } else { // larger than congestion window
                         okToSend = false;
+                        break;
                     }
                 } else {
                     okToSend = true;
@@ -274,6 +281,7 @@ uint64_t QUIC::SendData([[maybe_unused]] uint64_t sequence,
         stream_payload->AttachFrame(stream_frame);
         sockaddr_in addrTo = this->connections[sequence]->getAddrTo();
         std::shared_ptr<payload::Packet> stream_packet = std::make_shared<payload::Packet>(header, stream_payload, addrTo);
+        // while(stream_packet->EncodeLen() + this_connection->bytesInFlight > this_connection->congestionWindow){}
         this_connection->insertIntoPending(stream_packet);
     }
     std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(this->SrcID2DstID[this->Sequence2ID[sequence]], this->pktnum++, this_connection->getLargestAcked());
@@ -286,6 +294,7 @@ uint64_t QUIC::SendData([[maybe_unused]] uint64_t sequence,
     sockaddr_in addrTo = this->connections[sequence]->getAddrTo();
     std::shared_ptr<payload::Packet> stream_packet = std::make_shared<payload::Packet>(header, stream_payload, addrTo);
     this_connection->insertIntoPending(stream_packet);
+    utils::logger::info("send data end");
     return 0;
 }
 
@@ -569,6 +578,7 @@ int QUICServer::incomingMsg(
                 connection->setAlive(true);
                 connection->initial_complete = true;
                 sequence = this->connectionSequence++;
+                connection->sequence = sequence;
                 this->connections[sequence] = connection;
                 this->Sequence2ID[sequence] = id; 
                 this->ID2Sequence[id] = sequence;
