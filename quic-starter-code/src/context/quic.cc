@@ -299,6 +299,7 @@ void QUIC::handleACKFrame(std::shared_ptr<payload::ACKFrame> ackFrame, uint64_t 
             // change tracking interval
             std::shared_ptr<thquic::payload::Packet> packet = connection->getUnAckedPacket(packetNumber);
             if(packet == nullptr) continue;
+            
             for (auto frame : packet->GetPktPayload()->GetFrames()) {
                 if(frame->Type() == payload::FrameType::ACK) {
                     std::shared_ptr<payload::ACKFrame> subFrame = std::static_pointer_cast<payload::ACKFrame>(frame);
