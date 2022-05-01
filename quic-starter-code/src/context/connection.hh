@@ -32,6 +32,18 @@ class Connection {
         return 0;
     }
 
+    int insertIntoPendingFront(std::shared_ptr<payload::Packet> packet)
+    {
+        pendingPackets.push_front(packet);
+        return 0;
+    }
+
+    int insertIntoBuffer(std::shared_ptr<payload::Packet> packet)
+    {
+        packetsBuffer.push_back(packet);
+        return 0;
+    }
+
     void setAddrTo(struct sockaddr_in addr)
     {
         this->addrTo = addr;
@@ -116,6 +128,7 @@ public:
     std::chrono::steady_clock::time_point recoveryStartTime;
     uint64_t status = 0; // 0 is slow start, 1 is recovery, 2 is avoidance
     uint64_t minWindowSize = 2*MAX_SLICE_LENGTH;
+    std::list<std::shared_ptr<payload::Packet>> packetsBuffer;
 };
 
 }  // namespace thquic::context

@@ -69,7 +69,8 @@ void QUIC::checkPingPacket(std::shared_ptr<Connection> connection, std::chrono::
     // ping的间隔时间
     if (std::chrono::duration_cast<std::chrono::milliseconds>(now - connection->last_ping).count() > 1000) {
         // 开始发送PING frame
-        utils::logger::info("sending PING FRAME...");
+        utils::logger::info("sending PING FRAME... packet num = {}",this->pktnum);
+
         std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(ConnectionID(), this->pktnum++, connection->getLargestAcked());
         std::shared_ptr<payload::PingFrame> ping_frame = std::make_shared<payload::PingFrame>();
         std::shared_ptr<payload::Payload> ping_payload = std::make_shared<payload::Payload>();
@@ -78,6 +79,25 @@ void QUIC::checkPingPacket(std::shared_ptr<Connection> connection, std::chrono::
         std::shared_ptr<payload::Packet> ping_packet = std::make_shared<payload::Packet>(header, ping_payload, addrTo);
         connection->last_ping = now;
         connection->insertIntoPending(ping_packet);
+    }
+}
+
+void QUIC::checkBufferPacket(std::shared_ptr<Connection> connection)
+{
+    if(connection->GetPendingPackets().size() < 10)
+    {
+        for(int i = 0; i < 10 - connection->GetPendingPackets().size(); i++)
+        {
+            if(connection->packetsBuffer.size() == 0) break;
+            std::shared_ptr<payload::Packet> packet = connection->packetsBuffer.front();
+            std::shared_ptr<payload::PacketNumberMixin> mixin = std::dynamic_pointer_cast<payload::PacketNumberMixin>(packet->GetPktHeader());
+            uint64_t full = this->pktnum++;
+            utils::TruncatedPacketNumber truncated = utils::encodePacketNumber(full, connection->getLargestAcked());
+            mixin->ChangeTruncatedPacketNumber(truncated.first, truncated.second);
+            mixin->ChangeFullPacketNumber(full);
+            connection->insertIntoPending(packet);
+            connection->packetsBuffer.pop_front();
+        }
     }
 }
 
@@ -152,14 +172,30 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
     // check if ping frame needed
     this->checkPingPacket(connection, now);
 
+    this->checkBufferPacket(connection);
+
     std::list<std::shared_ptr<payload::Packet>>& pendingPackets = connection->GetPendingPackets();
 
     // 有即将发送的包，顺带发送ack
     if(!pendingPackets.empty() && !connection->getACKRanges().Empty())
     {
-        std::shared_ptr<payload::Packet> packet = pendingPackets.front();
+        std::shared_ptr<payload::Packet>& packet = pendingPackets.front();
         uint64_t pktNumber = connection->getACKRanges().GetEnd();
         uint64_t delay = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - connection->packetRecvTime.find(pktNumber)->second).count();
+        auto frames = packet->GetPktPayload()->GetFrames();
+        // remove old ACK Frames
+        for(auto frame = frames.begin(); frame != frames.end() ; frame ++) {
+            switch ((*frame)->Type()) {
+                case payload::FrameType::ACK:
+                case payload::FrameType::PING:
+                case payload::FrameType::PADDING:{
+                    packet->DeletePayloadFrame(std::distance(frames.begin(), frame));
+                    break;
+                }
+                default:
+                    break;
+            }
+        }
         std::shared_ptr<payload::ACKFrame> ackFrame = std::make_shared<payload::ACKFrame>(delay, connection->getACKRanges());
         connection->packetRecvTime.clear();
         packet->GetPktPayload()->AttachFrame(ackFrame);
@@ -189,6 +225,7 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
     //         pendingPackets.push_back(packet);
     //     }
     // }
+    
     return pendingPackets;
 }
 
@@ -270,7 +307,7 @@ uint64_t QUIC::SendData([[maybe_unused]] uint64_t sequence,
     uint8_t *buffer = buf.release();
     while(len > MAX_SLICE_LENGTH)
     {
-        std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(this->SrcID2DstID[this->Sequence2ID[sequence]], this->pktnum++, this_connection->getLargestAcked());
+        std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(this->SrcID2DstID[this->Sequence2ID[sequence]], 0, this_connection->getLargestAcked());
         std::unique_ptr<uint8_t[]> tmp = std::make_unique<uint8_t[]>(MAX_SLICE_LENGTH);
         std::copy(buffer, buffer + MAX_SLICE_LENGTH, tmp.get());
         std::shared_ptr<payload::StreamFrame> stream_frame = std::make_shared<payload::StreamFrame>(streamID, std::move(tmp), MAX_SLICE_LENGTH, this->streamID2Offset[streamID], MAX_SLICE_LENGTH, FIN);
@@ -281,10 +318,9 @@ uint64_t QUIC::SendData([[maybe_unused]] uint64_t sequence,
         stream_payload->AttachFrame(stream_frame);
         sockaddr_in addrTo = this->connections[sequence]->getAddrTo();
         std::shared_ptr<payload::Packet> stream_packet = std::make_shared<payload::Packet>(header, stream_payload, addrTo);
-        // while(stream_packet->EncodeLen() + this_connection->bytesInFlight > this_connection->congestionWindow){}
-        this_connection->insertIntoPending(stream_packet);
+        this_connection->insertIntoBuffer(stream_packet);
     }
-    std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(this->SrcID2DstID[this->Sequence2ID[sequence]], this->pktnum++, this_connection->getLargestAcked());
+    std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(this->SrcID2DstID[this->Sequence2ID[sequence]], 0, this_connection->getLargestAcked());
     std::unique_ptr<uint8_t[]> tmp = std::make_unique<uint8_t[]>(len);
     std::copy(buffer, buffer + len, tmp.get());
     std::shared_ptr<payload::StreamFrame> stream_frame = std::make_shared<payload::StreamFrame>(streamID, std::move(tmp), len, this->streamID2Offset[streamID], len, FIN);
@@ -293,8 +329,7 @@ uint64_t QUIC::SendData([[maybe_unused]] uint64_t sequence,
     stream_payload->AttachFrame(stream_frame);
     sockaddr_in addrTo = this->connections[sequence]->getAddrTo();
     std::shared_ptr<payload::Packet> stream_packet = std::make_shared<payload::Packet>(header, stream_payload, addrTo);
-    this_connection->insertIntoPending(stream_packet);
-    utils::logger::info("send data end");
+    this_connection->insertIntoBuffer(stream_packet);
     return 0;
 }
 
@@ -450,6 +485,7 @@ int QUICClient::incomingMsg(
             utils::logger::info("RECV A PACKET FROM SERVER, PACKET NUMBER: {}", recvPacketNumber);
             uint64_t sequence = this->ID2Sequence[header->GetDstID()];
             bool ackEliciting = false;
+            std::cout<<"bufferLen = "<<bufferLen<<std::endl;
             std::list<std::shared_ptr<payload::Frame>> frames = payload::Payload(stream, bufferLen - stream.Pos()).GetFrames();
             for (auto frame : frames) {
                 switch (frame->Type()) {

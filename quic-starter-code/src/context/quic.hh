@@ -60,6 +60,7 @@ class QUIC {
     void handleACKFrame(std::shared_ptr<payload::ACKFrame> ackFrame, uint64_t sequence);
     void checkPingPacket(std::shared_ptr<Connection> connection, std::chrono::steady_clock::time_point& now);
     void checkInitialPacket(std::shared_ptr<Connection> connection, std::chrono::steady_clock::time_point& now);
+    void checkBufferPacket(std::shared_ptr<Connection> connection);
     void detectLossAndRetransmisson(std::shared_ptr<Connection> connection, std::chrono::steady_clock::time_point& now);
     // Connection relative
     bool alive{true};
