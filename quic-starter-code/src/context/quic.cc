@@ -199,6 +199,7 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
             std::shared_ptr<payload::ACKFrame> ackFrame = std::make_shared<payload::ACKFrame>(delay, connection->getACKRanges());
             packet->GetPktPayload()->AttachFrame(ackFrame);
             connection->packetRecvTime.clear();
+            connection->first_ack_time = utils::timepoint(std::chrono::milliseconds(0));
         } else {
             if (connection->first_ack_time + config::MAX_ACK_DELAY > std::chrono::steady_clock::now()) {
                 std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(this->SrcID2DstID[this->Sequence2ID[connection->sequence]],
@@ -206,14 +207,12 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
                 std::shared_ptr<payload::Payload> payload = std::make_shared<payload::Payload>();
                 std::shared_ptr<payload::ACKFrame> ackFrame = std::make_shared<payload::ACKFrame>(delay, connection->getACKRanges());
                 connection->packetRecvTime.clear();
+                connection->first_ack_time = utils::timepoint(std::chrono::milliseconds(0));
                 payload->AttachFrame(ackFrame);
                 std::shared_ptr<payload::Packet> packet = std::make_shared<payload::Packet>(header, payload, connection->getAddrTo());
                 pendingPackets.push_back(packet);
             }
         }
-        
-        connection->packetRecvTime.clear();
-        
     }
     return pendingPackets;
 }
