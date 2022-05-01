@@ -16,7 +16,7 @@ class Connection {
         this->congestionWindow = 14720;
         this->ssthreshold = uint64_t(2147483647)*uint64_t(2147483647);
         this->bytesInFlight = 0;
-        this->recoveryStartTime = std::chrono::steady_clock::now();
+        this->recoveryStartTime = utils::clock::now();
     }
 
     std::list<std::shared_ptr<payload::Packet>>& GetPendingPackets() {
@@ -109,13 +109,13 @@ private:
 public:
     // RTT estimation relative
     utils::duration smoothed_rtt = config::loss_detection::INITIAL_RTT;
-    utils::duration latest_rtt = std::chrono::milliseconds(0);
-    utils::duration min_rtt = std::chrono::milliseconds(0);
+    utils::duration latest_rtt = config::ZERO_DURATION;
+    utils::duration min_rtt = config::ZERO_DURATION;
     utils::duration rttvar = config::loss_detection::INITIAL_RTT / 2;
     std::set<uint64_t> aliveStreams;
     std::map<uint64_t, utils::timepoint> packetRecvTime;
-    utils::timepoint first_ack_time = utils::timepoint(std::chrono::milliseconds(0));
-    utils::timepoint first_rtt_sample = utils::timepoint(std::chrono::milliseconds(0));
+    utils::timepoint first_ack_time = config::ZERO_TIMEPOINT;
+    utils::timepoint first_rtt_sample = config::ZERO_TIMEPOINT;;
     utils::timepoint last_ping;
     utils::timepoint last_initial;
     bool initial_complete = false;
