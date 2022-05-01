@@ -86,7 +86,7 @@ void QUIC::checkBufferPacket(std::shared_ptr<Connection> connection)
 {
     if(connection->GetPendingPackets().size() < 10)
     {
-        for(size_t i = 0; i < 10 - connection->GetPendingPackets().size(); i ++)
+        for(size_t i = 1; i < 10 - connection->GetPendingPackets().size(); i ++)
         {
             if(connection->packetsBuffer.size() == 0) break;
             std::shared_ptr<payload::Packet> packet = connection->packetsBuffer.front();
@@ -542,8 +542,9 @@ int QUICClient::incomingMsg(
                     default: utils::logger::warn("UNKNOWN FRAME TYPE");
                 }
             }
+            connection->getACKRanges().AddInterval(recvPacketNumber, recvPacketNumber);
             if (ackEliciting) {
-                connection->getACKRanges().AddInterval(recvPacketNumber, recvPacketNumber);
+                
                 // mark as the most earliest
                 if (connection->first_ack_time == utils::timepoint(utils::duration(0)))
                     connection->first_ack_time = std::chrono::steady_clock::now();
@@ -703,8 +704,9 @@ int QUICServer::incomingMsg(
                     default: utils::logger::warn("UNKNOWN FRAME TYPE");
                 }
             }
+            connection->getACKRanges().AddInterval(recvPacketNumber, recvPacketNumber);
             if (ackEliciting) {
-                connection->getACKRanges().AddInterval(recvPacketNumber, recvPacketNumber);
+                
                  // mark as the most earliest
                 if (connection->first_ack_time == utils::timepoint(utils::duration(0)))
                     connection->first_ack_time = std::chrono::steady_clock::now();
