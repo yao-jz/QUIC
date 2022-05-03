@@ -55,11 +55,13 @@ class QUIC {
     static std::shared_ptr<utils::UDPDatagram> encodeDatagram(
         const std::shared_ptr<payload::Packet>& pkt);
     virtual int incomingMsg(std::unique_ptr<utils::UDPDatagram> datagram) = 0;
+    bool updateRTT(std::shared_ptr<thquic::context::Connection> connection, std::shared_ptr<payload::ACKFrame> ackFrame);
     void handleACKFrame(std::shared_ptr<payload::ACKFrame> ackFrame, uint64_t sequence);
     void checkPingPacket(std::shared_ptr<Connection> connection, utils::timepoint& now);
     void checkInitialPacket(std::shared_ptr<Connection> connection, utils::timepoint& now);
     void checkBufferPacket(std::shared_ptr<Connection> connection);
     void detectLossAndRetransmisson(std::shared_ptr<Connection> connection, utils::timepoint& now);
+    void checkACKFrame(std::shared_ptr<Connection> connection);
     // Connection relative
     bool alive{true};
     uint64_t pktnum = 1;

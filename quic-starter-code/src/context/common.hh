@@ -17,7 +17,7 @@ enum class StreamType {
     SERVER_UNI = 3
 };
 
-constexpr int MAX_SLICE_LENGTH = 1370;
+constexpr int MAX_SLICE_LENGTH = 1000;
 
 constexpr size_t STREAM_TYPE_NUM = 4;
 

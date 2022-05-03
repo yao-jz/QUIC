@@ -140,19 +140,20 @@ void QUIC::detectLossAndRetransmisson(std::shared_ptr<Connection> connection, ut
                 }
             }
             if (!packet->GetPktPayload()->GetFrames().empty()) {
-                std::shared_ptr<payload::PacketNumberMixin> mixin = std::dynamic_pointer_cast<payload::PacketNumberMixin>(packet->GetPktHeader());
-                uint64_t full = this->pktnum++;
-                // reencode the packet number (because the length field may be changed)
-                utils::TruncatedPacketNumber truncated = utils::encodePacketNumber(full, connection->getLargestAcked());
-                mixin->ChangeTruncatedPacketNumber(truncated.first, truncated.second);
-                mixin->ChangeFullPacketNumber(full);
-                connection->insertIntoPending(packet);
+                // std::shared_ptr<payload::PacketNumberMixin> mixin = std::dynamic_pointer_cast<payload::PacketNumberMixin>(packet->GetPktHeader());
+                // uint64_t full = this->pktnum++;
+                // std::cout<<"lost packet new num = "<<full<<std::endl;
+                // // reencode the packet number (because the length field may be changed)
+                // utils::TruncatedPacketNumber truncated = utils::encodePacketNumber(full, connection->getLargestAcked());
+                // mixin->ChangeTruncatedPacketNumber(truncated.first, truncated.second);
+                // mixin->ChangeFullPacketNumber(full);
+                connection->insertIntoBuffer(packet);
             }
             packetNumsDel.push_back(packet_pair.first);
         }
     }
 
-    this->onPacketsLost(lostPackets, connection->sequence);
+    if(!lostPackets.empty()) this->onPacketsLost(lostPackets, connection->sequence);
 
     // discard lost packets
     for(auto packetnum : packetNumsDel) {
@@ -160,24 +161,8 @@ void QUIC::detectLossAndRetransmisson(std::shared_ptr<Connection> connection, ut
     }
 }
 
-std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<thquic::context::Connection> connection)
-{
-    utils::timepoint now = utils::clock::now();
-
-    // check if initial packet needed
-    this->checkInitialPacket(connection, now);
-
-    // check if there's loss and retransmission
-    this->detectLossAndRetransmisson(connection, now);
-
-    // check if ping frame needed
-    // this->checkPingPacket(connection, now);
-
-    this->checkBufferPacket(connection);
-
+void QUIC::checkACKFrame(std::shared_ptr<Connection> connection) {
     std::list<std::shared_ptr<payload::Packet>>& pendingPackets = connection->GetPendingPackets();
-
-    // check if there're ACK frames need to be sent
     if(!connection->getACKRanges().Empty()) {
         uint64_t pktNumber = connection->getACKRanges().GetEnd();
         uint64_t delay = std::chrono::duration_cast<std::chrono::milliseconds>(utils::clock::now() - connection->packetRecvTime.find(pktNumber)->second).count();
@@ -186,13 +171,9 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
             auto frames = packet->GetPktPayload()->GetFrames();
             // remove old ACK Frames
             for(auto frame = frames.begin(); frame != frames.end() ; frame ++) {
-                switch ((*frame)->Type()) {
-                    case payload::FrameType::ACK:{
-                        packet->DeletePayloadFrame(std::distance(frames.begin(), frame));
-                        break;
-                    }
-                    default:
-                        break;
+                if ((*frame)->Type() == payload::FrameType::ACK) {
+                    packet->DeletePayloadFrame(std::distance(frames.begin(), frame));
+                    break;
                 }
             }
             utils::logger::info("PENDING ACK HAS BEEN DELAYED FOR {} ms", delay);
@@ -211,9 +192,42 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
             pendingPackets.push_back(packet);
             connection->first_ack_time = config::ZERO_TIMEPOINT;
             connection->packetRecvTime.clear();
+            connection->first_ack_time = config::ZERO_TIMEPOINT;
+        } else {
+            if ((connection->first_ack_time + config::MAX_ACK_DELAY > utils::clock::now()) && (connection->first_ack_time != config::ZERO_TIMEPOINT)) {
+                std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(this->SrcID2DstID[this->Sequence2ID[connection->sequence]],
+                     this->pktnum++, connection->getLargestAcked());
+                std::shared_ptr<payload::Payload> payload = std::make_shared<payload::Payload>();
+                std::shared_ptr<payload::ACKFrame> ackFrame = std::make_shared<payload::ACKFrame>(delay, connection->getACKRanges());
+                connection->packetRecvTime.clear();
+                connection->first_ack_time = config::ZERO_TIMEPOINT;
+                payload->AttachFrame(ackFrame);
+                std::shared_ptr<payload::Packet> packet = std::make_shared<payload::Packet>(header, payload, connection->getAddrTo());
+                pendingPackets.push_back(packet);
+            }
         }
     }
-    return pendingPackets;
+    // TODO: check frame length
+}
+
+std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<thquic::context::Connection> connection)
+{
+    utils::timepoint now = utils::clock::now();
+
+    // check if initial packet needed
+    this->checkInitialPacket(connection, now);
+
+    // check if there's loss and retransmission
+    this->detectLossAndRetransmisson(connection, now);
+
+    // check if ping frame needed
+    // this->checkPingPacket(connection, now);
+
+    this->checkBufferPacket(connection);
+
+    // check if there're ACK frames need to be sent
+    this->checkACKFrame(connection);
+    return connection->GetPendingPackets();
 }
 
 int QUIC::SocketLoop() {
@@ -236,6 +250,7 @@ int QUIC::SocketLoop() {
                         okToSend = false;
                         break;
                     }
+                    std::cout<<"okToSend = "<<okToSend<<std::endl;
                 } else {
                     okToSend = true;
                 }
@@ -346,22 +361,25 @@ std::shared_ptr<utils::UDPDatagram> QUIC::encodeDatagram(
                                                 pkt->GetAddrDst(), 0);
 }
 
-
-void QUIC::handleACKFrame(std::shared_ptr<payload::ACKFrame> ackFrame, uint64_t sequence) {
-    std::shared_ptr<thquic::context::Connection> connection = this->connections[sequence];
-    std::list<utils::Interval> ackedIntervals = ackFrame->GetACKRanges().Intervals();
+/**
+ * @brief 更新RTT的估计值
+ * @param connection 
+ * @param ackFrame 
+ * @return true     更新成功
+ * @return false    更新失败
+ */
+bool QUIC::updateRTT(std::shared_ptr<thquic::context::Connection> connection, std::shared_ptr<payload::ACKFrame> ackFrame) {
     uint64_t largestAcked = ackFrame->GetLargestACKed();
     // check if this ACK frame is valid
     std::shared_ptr<payload::Packet> latestPacket = connection->getUnAckedPacket(largestAcked);
-    if (latestPacket == nullptr) return;
+    if (latestPacket == nullptr) return false;
     bool isNewlyAcked = (largestAcked > (connection->getLargestAcked()) || (connection->getLargestAcked() == std::numeric_limits<uint64_t>::max()));
     // check if this ACK frame can be used for RTT estimation
     if (isNewlyAcked && latestPacket->IsACKEliciting()){
         utils::duration ack_delay = std::chrono::milliseconds(ackFrame->GetACKDelay());
         if (ack_delay < config::MAX_ACK_DELAY) ack_delay = config::MAX_ACK_DELAY;
         connection->latest_rtt = utils::clock::now() - latestPacket->GetSendTimestamp();
-        utils::logger::info("PATH TRIP DELAY: {}", utils::formatTimeDuration(connection->latest_rtt));
-        if (connection->first_rtt_sample == utils::timepoint(std::chrono::milliseconds(0))) {
+        if (connection->first_rtt_sample == config::ZERO_TIMEPOINT) {
             connection->min_rtt = connection->latest_rtt;
             connection->smoothed_rtt = connection->latest_rtt;
             connection->rttvar = connection->latest_rtt / 2;
@@ -379,7 +397,19 @@ void QUIC::handleACKFrame(std::shared_ptr<payload::ACKFrame> ackFrame, uint64_t 
             connection->smoothed_rtt = 7 * connection->smoothed_rtt / 8 + adjusted_rtt / 8;
         }
     }
+    // uint64_t newLargetstAcked = ackFrame->GetLargestACKed();
+    if (isNewlyAcked > connection->getLargestAcked()) {
+        connection->setLargestAcked(largestAcked);
+    }
     utils::logger::info("ESTIMATE RTT: {}", utils::formatTimeDuration(connection->smoothed_rtt));
+    return true;
+}
+
+void QUIC::handleACKFrame(std::shared_ptr<payload::ACKFrame> ackFrame, uint64_t sequence) {
+    std::shared_ptr<thquic::context::Connection> connection = this->connections[sequence];
+    // check if ACK frame is valid & estimate rtt
+    if (!this->updateRTT(connection, ackFrame)) return;
+    std::list<utils::Interval> ackedIntervals = ackFrame->GetACKRanges().Intervals();
     for (utils::Interval interval : ackedIntervals) {
         utils::logger::info("ACKED PACKETS: START = {}, END = {}", interval.Start(), interval.End());
         for (uint64_t packetNumber = interval.Start(); packetNumber <= interval.End(); packetNumber++) {
@@ -389,7 +419,7 @@ void QUIC::handleACKFrame(std::shared_ptr<payload::ACKFrame> ackFrame, uint64_t 
             if (packet->IsByteInflight()) {
                 this->connections[sequence]->bytesInFlight -= packet->EncodeLen();
                 // if (this->inCongestionRecovery(sequence, packet->GetSendTimestamp())) {
-                if (std::chrono::duration_cast<std::chrono::milliseconds>(packet->GetSendTimestamp().time_since_epoch()).count() >= std::chrono::duration_cast<std::chrono::microseconds>(this->connections[sequence]->recoveryStartTime.time_since_epoch()).count()) {
+                if (std::chrono::duration_cast<std::chrono::milliseconds>(packet->GetSendTimestamp().time_since_epoch()).count() <= std::chrono::duration_cast<std::chrono::microseconds>(this->connections[sequence]->recoveryStartTime.time_since_epoch()).count()) {
                     // pass
                 } else {
                     if (this->connections[sequence]->congestionWindow < this->connections[sequence]->ssthreshold) {
@@ -410,13 +440,10 @@ void QUIC::handleACKFrame(std::shared_ptr<payload::ACKFrame> ackFrame, uint64_t 
             connection->removeFromUnAckedPackets(packetNumber);
         }
     }
-    // uint64_t newLargetstAcked = ackFrame->GetLargestACKed();
-    if (isNewlyAcked > connection->getLargestAcked()) {
-        connection->setLargestAcked(largestAcked);
-    }
 }
 
 void QUIC::onPacketsLost(std::list<std::shared_ptr<payload::Packet>> lostPackets, int sequence){
+    std::cout<<"enter onPL"<<std::endl;
     auto now = utils::clock::now();
     long int sentTimeOfLastLoss = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
     for (auto lostPacket : lostPackets) {
@@ -433,12 +460,12 @@ void QUIC::onPacketsLost(std::list<std::shared_ptr<payload::Packet>> lostPackets
 }
 
 void QUIC::enterRecovery(long int sentTimeOfLastLoss, int sequence) {
-    if (sentTimeOfLastLoss >= std::chrono::duration_cast<std::chrono::milliseconds>(this->connections[sequence]->recoveryStartTime.time_since_epoch()).count())
+    if (sentTimeOfLastLoss <= std::chrono::duration_cast<std::chrono::milliseconds>(this->connections[sequence]->recoveryStartTime.time_since_epoch()).count())
         return;
     this->connections[sequence]->recoveryStartTime = utils::clock::now();
-    this->connections[sequence]->ssthreshold /=2;
+    this->connections[sequence]->ssthreshold = this->connections[sequence]->congestionWindow/2;
     this->connections[sequence]->congestionWindow = std::max(this->connections[sequence]->ssthreshold, this->connections[sequence]->minWindowSize);
-    
+    std::cout<<"window size = "<<this->connections[sequence]->congestionWindow<<std::endl;
 }
 
 int QUICClient::incomingMsg(
@@ -483,8 +510,8 @@ int QUICClient::incomingMsg(
                 switch (frame->Type()) {
                     case payload::FrameType::STREAM: {
                         ackEliciting = true;
-                        utils::logger::info("SERVER Frame Type::STREAM");
                         std::shared_ptr<payload::StreamFrame> streamFrame = std::static_pointer_cast<payload::StreamFrame>(frame);
+                        utils::logger::info("SERVER Frame Type::STREAM, offset = {}", streamFrame->GetOffset());
                         uint64_t streamID = streamFrame->StreamID();
                         if (connection->aliveStreams.find(streamID) == connection->aliveStreams.end()) {
                             utils::logger::warn("RECV A FRAME FROM CLOSED STREAM : {}", streamID);

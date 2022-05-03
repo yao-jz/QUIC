@@ -115,7 +115,7 @@ public:
     std::set<uint64_t> aliveStreams;
     std::map<uint64_t, utils::timepoint> packetRecvTime;
     utils::timepoint first_ack_time = config::ZERO_TIMEPOINT;
-    utils::timepoint first_rtt_sample = config::ZERO_TIMEPOINT;;
+    utils::timepoint first_rtt_sample = config::ZERO_TIMEPOINT;
     utils::timepoint last_ping;
     utils::timepoint last_initial;
     bool initial_complete = false;
