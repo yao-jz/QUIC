@@ -50,13 +50,13 @@ int QUIC::SetConnectionCloseCallback(
  * @brief 判断是否要发送Initial 包
  * @param connection 
  */
-void QUIC::checkInitialPacket(std::shared_ptr<Connection> connection, std::chrono::steady_clock::time_point& now){
+void QUIC::checkInitialPacket(std::shared_ptr<Connection> connection, utils::timepoint& now){
     // periodically send Initial packet
     if (!connection->initial_complete && std::chrono::duration_cast<std::chrono::milliseconds>(now - connection->last_initial).count() > INITIAL_INTERVAL) {
         std::shared_ptr<payload::Initial> initial_header = std::make_shared<payload::Initial>(config::QUIC_VERSION, this->Sequence2ID[connection->sequence], ConnectionID(), this->pktnum++, connection->getLargestAcked());
         std::shared_ptr<payload::Payload> initial_payload = std::make_shared<payload::Payload>();
         std::shared_ptr<payload::Packet> initial_packet = std::make_shared<payload::Packet>(initial_header, initial_payload, connection->getAddrTo());
-        connection->last_initial = std::chrono::steady_clock::now();
+        connection->last_initial = utils::clock::now();
         connection->insertIntoPending(initial_packet);
     }
 }
@@ -65,7 +65,7 @@ void QUIC::checkInitialPacket(std::shared_ptr<Connection> connection, std::chron
  * @brief 判断是否要发送ping包
  * @param connection 需要检查的连接
  */
-void QUIC::checkPingPacket(std::shared_ptr<Connection> connection, std::chrono::steady_clock::time_point& now){
+void QUIC::checkPingPacket(std::shared_ptr<Connection> connection, utils::timepoint& now){
     // ping的间隔时间
     if (now - connection->last_ping > config::PING_INTERVAL) {
         // 开始发送PING frame
@@ -105,7 +105,7 @@ void QUIC::checkBufferPacket(std::shared_ptr<Connection> connection)
  * @brief 检查是否有包已经丢失，需要进行重传
  * @param connection 
  */
-void QUIC::detectLossAndRetransmisson(std::shared_ptr<Connection> connection, std::chrono::steady_clock::time_point& now) {
+void QUIC::detectLossAndRetransmisson(std::shared_ptr<Connection> connection, utils::timepoint& now) {
     // get unacked packets sent by this connection
     std::map<uint64_t,std::shared_ptr<payload::Packet>>& unAckedPackets = connection->getUnAckedPackets();
     utils::duration rawThreshold = K_TIME_THRESHOLD((connection->latest_rtt > connection->smoothed_rtt ? connection->latest_rtt : connection->smoothed_rtt));
@@ -162,7 +162,7 @@ void QUIC::detectLossAndRetransmisson(std::shared_ptr<Connection> connection, st
 
 std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<thquic::context::Connection> connection)
 {
-    std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+    utils::timepoint now = utils::clock::now();
 
     // check if initial packet needed
     this->checkInitialPacket(connection, now);
@@ -177,10 +177,11 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
 
     std::list<std::shared_ptr<payload::Packet>>& pendingPackets = connection->GetPendingPackets();
 
-
-    if(!connection->getACKRanges().Empty()) {
+    // check if there're ACK frames need to be sent
+    if(!connection->getACKRanges().Empty() && connection->first_ack_time != config::ZERO_TIMEPOINT) {
         uint64_t pktNumber = connection->getACKRanges().GetEnd();
-        uint64_t delay = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - connection->packetRecvTime.find(pktNumber)->second).count();
+        uint64_t delay = std::chrono::duration_cast<std::chrono::milliseconds>(utils::clock::now() - connection->packetRecvTime.find(pktNumber)->second).count();
+        utils::logger::info("PENDING ACK HAS BEEN DELAYED FOR {} ms", delay);
         if (!pendingPackets.empty()) {
             std::shared_ptr<payload::Packet> packet = pendingPackets.front();
             auto frames = packet->GetPktPayload()->GetFrames();
@@ -200,15 +201,15 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
             std::shared_ptr<payload::ACKFrame> ackFrame = std::make_shared<payload::ACKFrame>(delay, connection->getACKRanges());
             packet->GetPktPayload()->AttachFrame(ackFrame);
             connection->packetRecvTime.clear();
-            connection->first_ack_time = utils::timepoint(std::chrono::milliseconds(0));
+            connection->first_ack_time = config::ZERO_TIMEPOINT;
         } else {
-            if (connection->first_ack_time + config::MAX_ACK_DELAY > std::chrono::steady_clock::now()) {
+            if (connection->first_ack_time + config::MAX_ACK_DELAY > utils::clock::now()) {
                 std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(this->SrcID2DstID[this->Sequence2ID[connection->sequence]],
                      this->pktnum++, connection->getLargestAcked());
                 std::shared_ptr<payload::Payload> payload = std::make_shared<payload::Payload>();
                 std::shared_ptr<payload::ACKFrame> ackFrame = std::make_shared<payload::ACKFrame>(delay, connection->getACKRanges());
                 connection->packetRecvTime.clear();
-                connection->first_ack_time = utils::timepoint(std::chrono::milliseconds(0));
+                connection->first_ack_time = config::ZERO_TIMEPOINT;
                 payload->AttachFrame(ackFrame);
                 std::shared_ptr<payload::Packet> packet = std::make_shared<payload::Packet>(header, payload, connection->getAddrTo());
                 pendingPackets.push_back(packet);
@@ -243,7 +244,7 @@ int QUIC::SocketLoop() {
                 }
                 if (okToSend) {
                     utils::logger::info("SEND A PACKET, NUMBER = {}", pendingPackets.front()->GetPacketNumber());
-                    std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+                    utils::timepoint now = utils::clock::now();
                     pendingPackets.front()->MarkSendTimestamp(now);
                     auto newDatagram = QUIC::encodeDatagram(pendingPackets.front());
                     this->socket.sendMsg(newDatagram);
@@ -363,15 +364,15 @@ void QUIC::handleACKFrame(std::shared_ptr<payload::ACKFrame> ackFrame, uint64_t 
     if (isNewlyAcked && latestPacket->IsACKEliciting()){
         utils::duration ack_delay = std::chrono::milliseconds(ackFrame->GetACKDelay());
         if (ack_delay < config::MAX_ACK_DELAY) ack_delay = config::MAX_ACK_DELAY;
-        connection->latest_rtt = std::chrono::steady_clock::now() - latestPacket->GetSendTimestamp();
-        if (connection->first_rtt_sample == std::chrono::milliseconds(0)) {
+        connection->latest_rtt = utils::clock::now() - latestPacket->GetSendTimestamp();
+        if (connection->first_rtt_sample == config::ZERO_TIMEPOINT) {
             connection->min_rtt = connection->latest_rtt;
             connection->smoothed_rtt = connection->latest_rtt;
             connection->rttvar = connection->latest_rtt / 2;
-            connection->first_rtt_sample = std::chrono::milliseconds(1);
+            connection->first_rtt_sample = utils::clock::now();
         }
         else {
-            connection->min_rtt = connection->min_rtt < connection->latest_rtt ? connection->min_rtt : connection->latest_rtt;
+            connection->min_rtt = (connection->min_rtt < connection->latest_rtt) ? connection->min_rtt : connection->latest_rtt;
             // TODO: Handshake
             utils::duration adjusted_rtt = connection->latest_rtt;
             if (connection->latest_rtt > connection->min_rtt + ack_delay){
@@ -420,7 +421,7 @@ void QUIC::handleACKFrame(std::shared_ptr<payload::ACKFrame> ackFrame, uint64_t 
 }
 
 void QUIC::onPacketsLost(std::list<std::shared_ptr<payload::Packet>> lostPackets, int sequence){
-    auto now = std::chrono::steady_clock::now();
+    auto now = utils::clock::now();
     long int sentTimeOfLastLoss = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
     for (auto lostPacket : lostPackets) {
         if (lostPacket->IsByteInflight()){
@@ -438,7 +439,7 @@ void QUIC::onPacketsLost(std::list<std::shared_ptr<payload::Packet>> lostPackets
 void QUIC::enterRecovery(long int sentTimeOfLastLoss, int sequence) {
     if (sentTimeOfLastLoss >= std::chrono::duration_cast<std::chrono::milliseconds>(this->connections[sequence]->recoveryStartTime.time_since_epoch()).count())
         return;
-    this->connections[sequence]->recoveryStartTime = std::chrono::steady_clock::now();
+    this->connections[sequence]->recoveryStartTime = utils::clock::now();
     this->connections[sequence]->ssthreshold /=2;
     this->connections[sequence]->congestionWindow = std::max(this->connections[sequence]->ssthreshold, this->connections[sequence]->minWindowSize);
     
@@ -550,7 +551,7 @@ int QUICClient::incomingMsg(
                 
                 // mark as the most earliest
                 if (connection->first_ack_time == utils::timepoint(utils::duration(0)))
-                    connection->first_ack_time = std::chrono::steady_clock::now();
+                    connection->first_ack_time = utils::clock::now();
             }
             break;
         }
@@ -583,7 +584,7 @@ int QUICServer::incomingMsg(
     }
     
     payload::PacketType packetType = header->Type();
-    std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+    utils::timepoint now = utils::clock::now();
 
     switch (packetType) {
         case payload::PacketType::INITIAL: {
@@ -712,7 +713,7 @@ int QUICServer::incomingMsg(
                 
                  // mark as the most earliest
                 if (connection->first_ack_time == utils::timepoint(utils::duration(0)))
-                    connection->first_ack_time = std::chrono::steady_clock::now();
+                    connection->first_ack_time = utils::clock::now();
             }
             break;
         }
@@ -762,8 +763,8 @@ uint64_t QUICClient::CreateConnection(
     std::shared_ptr<utils::UDPDatagram> initial_dg = QUIC::encodeDatagram(initial_packet);
     this->socket.sendMsg(initial_dg);
     this->connectionReadyCallback = callback;
-    connection->last_ping = std::chrono::steady_clock::now();
-    connection->last_initial = std::chrono::steady_clock::now();
+    connection->last_ping = utils::clock::now();
+    connection->last_initial = utils::clock::now();
     return 0;
 }
 
