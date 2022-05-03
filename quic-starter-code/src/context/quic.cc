@@ -86,7 +86,8 @@ void QUIC::checkBufferPacket(std::shared_ptr<Connection> connection)
 {
     if(connection->GetPendingPackets().size() < 10)
     {
-        for(size_t i = 1; i < 10 - connection->GetPendingPackets().size(); i ++)
+        int maxNum = 10 - connection->GetPendingPackets().size();
+        for(int i = 1; i < maxNum; i ++)
         {
             if(connection->packetsBuffer.size() == 0) break;
             std::shared_ptr<payload::Packet> packet = connection->packetsBuffer.front();
@@ -139,19 +140,20 @@ void QUIC::detectLossAndRetransmisson(std::shared_ptr<Connection> connection, ut
                 }
             }
             if (!packet->GetPktPayload()->GetFrames().empty()) {
-                std::shared_ptr<payload::PacketNumberMixin> mixin = std::dynamic_pointer_cast<payload::PacketNumberMixin>(packet->GetPktHeader());
-                uint64_t full = this->pktnum++;
-                // reencode the packet number (because the length field may be changed)
-                utils::TruncatedPacketNumber truncated = utils::encodePacketNumber(full, connection->getLargestAcked());
-                mixin->ChangeTruncatedPacketNumber(truncated.first, truncated.second);
-                mixin->ChangeFullPacketNumber(full);
-                connection->insertIntoPending(packet);
+                // std::shared_ptr<payload::PacketNumberMixin> mixin = std::dynamic_pointer_cast<payload::PacketNumberMixin>(packet->GetPktHeader());
+                // uint64_t full = this->pktnum++;
+                // std::cout<<"lost packet new num = "<<full<<std::endl;
+                // // reencode the packet number (because the length field may be changed)
+                // utils::TruncatedPacketNumber truncated = utils::encodePacketNumber(full, connection->getLargestAcked());
+                // mixin->ChangeTruncatedPacketNumber(truncated.first, truncated.second);
+                // mixin->ChangeFullPacketNumber(full);
+                connection->insertIntoBuffer(packet);
             }
             packetNumsDel.push_back(packet_pair.first);
         }
     }
 
-    this->onPacketsLost(lostPackets, connection->sequence);
+    if(!lostPackets.empty()) this->onPacketsLost(lostPackets, connection->sequence);
 
     // discard lost packets
     for(auto packetnum : packetNumsDel) {
@@ -235,6 +237,7 @@ int QUIC::SocketLoop() {
                         okToSend = false;
                         break;
                     }
+                    std::cout<<"okToSend = "<<okToSend<<std::endl;
                 } else {
                     okToSend = true;
                 }
@@ -307,7 +310,6 @@ uint64_t QUIC::SendData([[maybe_unused]] uint64_t sequence,
         std::shared_ptr<payload::Packet> stream_packet = std::make_shared<payload::Packet>(header, stream_payload, addrTo);
         this_connection->insertIntoBuffer(stream_packet);
     }
-    std::cout<<this_connection->getLargestAcked()<<std::endl;
     std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(this->SrcID2DstID[this->Sequence2ID[sequence]], this->pktnum, this_connection->getLargestAcked());
     std::unique_ptr<uint8_t[]> tmp = std::make_unique<uint8_t[]>(len);
     std::copy(buffer, buffer + len, tmp.get());
@@ -389,7 +391,7 @@ void QUIC::handleACKFrame(std::shared_ptr<payload::ACKFrame> ackFrame, uint64_t 
             if (packet->IsByteInflight()) {
                 this->connections[sequence]->bytesInFlight -= packet->EncodeLen();
                 // if (this->inCongestionRecovery(sequence, packet->GetSendTimestamp())) {
-                if (std::chrono::duration_cast<std::chrono::milliseconds>(packet->GetSendTimestamp().time_since_epoch()).count() >= std::chrono::duration_cast<std::chrono::microseconds>(this->connections[sequence]->recoveryStartTime.time_since_epoch()).count()) {
+                if (std::chrono::duration_cast<std::chrono::milliseconds>(packet->GetSendTimestamp().time_since_epoch()).count() <= std::chrono::duration_cast<std::chrono::microseconds>(this->connections[sequence]->recoveryStartTime.time_since_epoch()).count()) {
                     // pass
                 } else {
                     if (this->connections[sequence]->congestionWindow < this->connections[sequence]->ssthreshold) {
@@ -417,6 +419,7 @@ void QUIC::handleACKFrame(std::shared_ptr<payload::ACKFrame> ackFrame, uint64_t 
 }
 
 void QUIC::onPacketsLost(std::list<std::shared_ptr<payload::Packet>> lostPackets, int sequence){
+    std::cout<<"enter onPL"<<std::endl;
     auto now = utils::clock::now();
     long int sentTimeOfLastLoss = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
     for (auto lostPacket : lostPackets) {
@@ -433,12 +436,12 @@ void QUIC::onPacketsLost(std::list<std::shared_ptr<payload::Packet>> lostPackets
 }
 
 void QUIC::enterRecovery(long int sentTimeOfLastLoss, int sequence) {
-    if (sentTimeOfLastLoss >= std::chrono::duration_cast<std::chrono::milliseconds>(this->connections[sequence]->recoveryStartTime.time_since_epoch()).count())
+    if (sentTimeOfLastLoss <= std::chrono::duration_cast<std::chrono::milliseconds>(this->connections[sequence]->recoveryStartTime.time_since_epoch()).count())
         return;
     this->connections[sequence]->recoveryStartTime = utils::clock::now();
-    this->connections[sequence]->ssthreshold /=2;
+    this->connections[sequence]->ssthreshold = this->connections[sequence]->congestionWindow/2;
     this->connections[sequence]->congestionWindow = std::max(this->connections[sequence]->ssthreshold, this->connections[sequence]->minWindowSize);
-    
+    std::cout<<"window size = "<<this->connections[sequence]->congestionWindow<<std::endl;
 }
 
 int QUICClient::incomingMsg(
@@ -484,8 +487,8 @@ int QUICClient::incomingMsg(
                 switch (frame->Type()) {
                     case payload::FrameType::STREAM: {
                         ackEliciting = true;
-                        utils::logger::info("SERVER Frame Type::STREAM");
                         std::shared_ptr<payload::StreamFrame> streamFrame = std::static_pointer_cast<payload::StreamFrame>(frame);
+                        utils::logger::info("SERVER Frame Type::STREAM, offset = {}", streamFrame->GetOffset());
                         uint64_t streamID = streamFrame->StreamID();
                         if (connection->aliveStreams.find(streamID) == connection->aliveStreams.end()) {
                             utils::logger::warn("RECV A FRAME FROM CLOSED STREAM : {}", streamID);
@@ -542,7 +545,6 @@ int QUICClient::incomingMsg(
                 }
             }
             connection->getACKRanges().AddInterval(recvPacketNumber, recvPacketNumber);
-            std::cout<<"after reveive packet "<<connection->getACKRanges().Dump()<<std::endl;
             if (ackEliciting) {
                 
                 // mark as the most earliest
