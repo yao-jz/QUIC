@@ -118,7 +118,6 @@ void QUIC::detectLossAndRetransmisson(std::shared_ptr<Connection> connection, ut
         std::shared_ptr<payload::Packet> packet = packet_pair.second;
         // we don't think it is lost
         if(!packet->IsACKEliciting()) continue;
-        if(packet->GetPacketNumber() > connection->getLargestAcked()) continue;
         utils::timepoint sendTime = packet_pair.second->GetSendTimestamp();
         // packet loss when: (1) packet number < largest acked - kPackethreshold (2) timeSent < now - timeThreshold
         if (packet->GetPacketNumber() < pktThreshold || sendTime < timeThreshold) {
@@ -171,26 +170,23 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
     this->detectLossAndRetransmisson(connection, now);
 
     // check if ping frame needed
-    this->checkPingPacket(connection, now);
+    // this->checkPingPacket(connection, now);
 
     this->checkBufferPacket(connection);
 
     std::list<std::shared_ptr<payload::Packet>>& pendingPackets = connection->GetPendingPackets();
 
     // check if there're ACK frames need to be sent
-    if(!connection->getACKRanges().Empty() && connection->first_ack_time != config::ZERO_TIMEPOINT) {
+    if(!connection->getACKRanges().Empty()) {
         uint64_t pktNumber = connection->getACKRanges().GetEnd();
         uint64_t delay = std::chrono::duration_cast<std::chrono::milliseconds>(utils::clock::now() - connection->packetRecvTime.find(pktNumber)->second).count();
-        utils::logger::info("PENDING ACK HAS BEEN DELAYED FOR {} ms", delay);
         if (!pendingPackets.empty()) {
             std::shared_ptr<payload::Packet> packet = pendingPackets.front();
             auto frames = packet->GetPktPayload()->GetFrames();
             // remove old ACK Frames
             for(auto frame = frames.begin(); frame != frames.end() ; frame ++) {
                 switch ((*frame)->Type()) {
-                    case payload::FrameType::ACK:
-                    case payload::FrameType::PING:
-                    case payload::FrameType::PADDING:{
+                    case payload::FrameType::ACK:{
                         packet->DeletePayloadFrame(std::distance(frames.begin(), frame));
                         break;
                     }
@@ -203,7 +199,7 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
             connection->packetRecvTime.clear();
             connection->first_ack_time = config::ZERO_TIMEPOINT;
         } else {
-            if (connection->first_ack_time + config::MAX_ACK_DELAY > utils::clock::now()) {
+            if ((connection->first_ack_time + config::MAX_ACK_DELAY > utils::clock::now()) && (connection->first_ack_time != config::ZERO_TIMEPOINT)) {
                 std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(this->SrcID2DstID[this->Sequence2ID[connection->sequence]],
                      this->pktnum++, connection->getLargestAcked());
                 std::shared_ptr<payload::Payload> payload = std::make_shared<payload::Payload>();
