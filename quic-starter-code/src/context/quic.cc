@@ -117,7 +117,7 @@ void QUIC::detectLossAndRetransmisson(std::shared_ptr<Connection> connection, ut
     for(auto packet_pair : unAckedPackets) {
         std::shared_ptr<payload::Packet> packet = packet_pair.second;
         // we don't think it is lost
-        if(packet->IsACKEliciting()) continue;
+        if(!packet->IsACKEliciting()) continue;
         if(packet->GetPacketNumber() > connection->getLargestAcked()) continue;
         utils::timepoint sendTime = packet_pair.second->GetSendTimestamp();
         // packet loss when: (1) packet number < largest acked - kPackethreshold (2) timeSent < now - timeThreshold
