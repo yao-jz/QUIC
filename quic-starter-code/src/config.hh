@@ -19,7 +19,6 @@ constexpr utils::clock::duration PING_INTERVAL = 2s;
 constexpr utils::duration ZERO_DURATION = std::chrono::milliseconds(0);
 constexpr utils::timepoint ZERO_TIMEPOINT = utils::timepoint(ZERO_DURATION);
 
-
 namespace loss_detection {
 constexpr uint64_t PACKET_THRESHOLD = 3;
 constexpr uint64_t TIME_THRESHOLD = 8;

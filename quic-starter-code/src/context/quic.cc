@@ -86,8 +86,7 @@ void QUIC::checkBufferPacket(std::shared_ptr<Connection> connection)
 {
     if(connection->GetPendingPackets().size() < 10)
     {
-        int maxNum = 10 - connection->GetPendingPackets().size();
-        for(int i = 1; i < maxNum; i ++)
+        for(size_t i = 1; i < 10 - connection->GetPendingPackets().size(); i ++)
         {
             if(connection->packetsBuffer.size() == 0) break;
             std::shared_ptr<payload::Packet> packet = connection->packetsBuffer.front();
@@ -114,6 +113,7 @@ void QUIC::detectLossAndRetransmisson(std::shared_ptr<Connection> connection, ut
     uint64_t pktThreshold = (connection->getLargestAcked() > config::loss_detection::PACKET_THRESHOLD) ? 
             connection->getLargestAcked() - config::loss_detection::PACKET_THRESHOLD : 0;
     std::vector<uint64_t> packetNumsDel;
+    // utils::logger::info("THRESHOLD TIME: {}, PKT: {}", utils::formatTimepoint(timeThreshold), pktThreshold);
     std::list<std::shared_ptr<payload::Packet>> lostPackets;
     for(auto packet_pair : unAckedPackets) {
         std::shared_ptr<payload::Packet> packet = packet_pair.second;
@@ -176,8 +176,21 @@ void QUIC::checkACKFrame(std::shared_ptr<Connection> connection) {
                     break;
                 }
             }
+            utils::logger::info("PENDING ACK HAS BEEN DELAYED FOR {} ms", delay);
             std::shared_ptr<payload::ACKFrame> ackFrame = std::make_shared<payload::ACKFrame>(delay, connection->getACKRanges());
             packet->GetPktPayload()->AttachFrame(ackFrame);
+            connection->first_ack_time = config::ZERO_TIMEPOINT;
+            connection->packetRecvTime.clear();
+        } else if ((connection->first_ack_time + config::MAX_ACK_DELAY > utils::clock::now()) && connection->first_ack_time != config::ZERO_TIMEPOINT) {
+            utils::logger::info("PENDING ACK HAS BEEN DELAYED FOR {} ms", delay);
+            std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(this->SrcID2DstID[this->Sequence2ID[connection->sequence]],
+                    this->pktnum++, connection->getLargestAcked());
+            std::shared_ptr<payload::Payload> payload = std::make_shared<payload::Payload>();
+            std::shared_ptr<payload::ACKFrame> ackFrame = std::make_shared<payload::ACKFrame>(delay, connection->getACKRanges());
+            payload->AttachFrame(ackFrame);
+            std::shared_ptr<payload::Packet> packet = std::make_shared<payload::Packet>(header, payload, connection->getAddrTo());
+            pendingPackets.push_back(packet);
+            connection->first_ack_time = config::ZERO_TIMEPOINT;
             connection->packetRecvTime.clear();
             connection->first_ack_time = config::ZERO_TIMEPOINT;
         } else {
@@ -379,7 +392,7 @@ bool QUIC::updateRTT(std::shared_ptr<thquic::context::Connection> connection, st
             if (connection->latest_rtt > connection->min_rtt + ack_delay){
                 adjusted_rtt = connection->latest_rtt - ack_delay;
             }
-            utils::duration diff = connection->smoothed_rtt > adjusted_rtt ? connection->smoothed_rtt - adjusted_rtt : adjusted_rtt - connection->smoothed_rtt;
+            utils::duration diff = (connection->smoothed_rtt > adjusted_rtt) ? (connection->smoothed_rtt - adjusted_rtt) : (adjusted_rtt - connection->smoothed_rtt);
             connection->rttvar = 3 * connection->rttvar / 4 + diff / 4;
             connection->smoothed_rtt = 7 * connection->smoothed_rtt / 8 + adjusted_rtt / 8;
         }
@@ -492,7 +505,6 @@ int QUICClient::incomingMsg(
             utils::logger::info("RECV A PACKET FROM SERVER, PACKET NUMBER: {}", recvPacketNumber);
             uint64_t sequence = this->ID2Sequence[header->GetDstID()];
             bool ackEliciting = false;
-            std::cout<<"bufferLen = "<<bufferLen<<std::endl;
             std::list<std::shared_ptr<payload::Frame>> frames = payload::Payload(stream, bufferLen - stream.Pos()).GetFrames();
             for (auto frame : frames) {
                 switch (frame->Type()) {
@@ -557,9 +569,8 @@ int QUICClient::incomingMsg(
             }
             connection->getACKRanges().AddInterval(recvPacketNumber, recvPacketNumber);
             if (ackEliciting) {
-                
                 // mark as the most earliest
-                if (connection->first_ack_time == utils::timepoint(utils::duration(0)))
+                if (connection->first_ack_time == config::ZERO_TIMEPOINT)
                     connection->first_ack_time = utils::clock::now();
             }
             break;
@@ -719,9 +730,8 @@ int QUICServer::incomingMsg(
             }
             connection->getACKRanges().AddInterval(recvPacketNumber, recvPacketNumber);
             if (ackEliciting) {
-                
                  // mark as the most earliest
-                if (connection->first_ack_time == utils::timepoint(utils::duration(0)))
+                if (connection->first_ack_time == config::ZERO_TIMEPOINT)
                     connection->first_ack_time = utils::clock::now();
             }
             break;
