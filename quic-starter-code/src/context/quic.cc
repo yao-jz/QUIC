@@ -113,12 +113,12 @@ void QUIC::detectLossAndRetransmisson(std::shared_ptr<Connection> connection, ut
     uint64_t pktThreshold = (connection->getLargestAcked() > config::loss_detection::PACKET_THRESHOLD) ? 
             connection->getLargestAcked() - config::loss_detection::PACKET_THRESHOLD : 0;
     std::vector<uint64_t> packetNumsDel;
+    // utils::logger::info("THRESHOLD TIME: {}, PKT: {}", utils::formatTimepoint(timeThreshold), pktThreshold);
     std::list<std::shared_ptr<payload::Packet>> lostPackets;
     for(auto packet_pair : unAckedPackets) {
         std::shared_ptr<payload::Packet> packet = packet_pair.second;
         // we don't think it is lost
         if(!packet->IsACKEliciting()) continue;
-        if(packet->GetPacketNumber() > connection->getLargestAcked()) continue;
         utils::timepoint sendTime = packet_pair.second->GetSendTimestamp();
         // packet loss when: (1) packet number < largest acked - kPackethreshold (2) timeSent < now - timeThreshold
         if (packet->GetPacketNumber() < pktThreshold || sendTime < timeThreshold) {
@@ -171,26 +171,23 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
     this->detectLossAndRetransmisson(connection, now);
 
     // check if ping frame needed
-    this->checkPingPacket(connection, now);
+    // this->checkPingPacket(connection, now);
 
     this->checkBufferPacket(connection);
 
     std::list<std::shared_ptr<payload::Packet>>& pendingPackets = connection->GetPendingPackets();
 
     // check if there're ACK frames need to be sent
-    if(!connection->getACKRanges().Empty() && connection->first_ack_time != config::ZERO_TIMEPOINT) {
+    if(!connection->getACKRanges().Empty()) {
         uint64_t pktNumber = connection->getACKRanges().GetEnd();
         uint64_t delay = std::chrono::duration_cast<std::chrono::milliseconds>(utils::clock::now() - connection->packetRecvTime.find(pktNumber)->second).count();
-        utils::logger::info("PENDING ACK HAS BEEN DELAYED FOR {} ms", delay);
         if (!pendingPackets.empty()) {
             std::shared_ptr<payload::Packet> packet = pendingPackets.front();
             auto frames = packet->GetPktPayload()->GetFrames();
             // remove old ACK Frames
             for(auto frame = frames.begin(); frame != frames.end() ; frame ++) {
                 switch ((*frame)->Type()) {
-                    case payload::FrameType::ACK:
-                    case payload::FrameType::PING:
-                    case payload::FrameType::PADDING:{
+                    case payload::FrameType::ACK:{
                         packet->DeletePayloadFrame(std::distance(frames.begin(), frame));
                         break;
                     }
@@ -198,11 +195,13 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
                         break;
                 }
             }
+            utils::logger::info("PENDING ACK HAS BEEN DELAYED FOR {} ms", delay);
             std::shared_ptr<payload::ACKFrame> ackFrame = std::make_shared<payload::ACKFrame>(delay, connection->getACKRanges());
             packet->GetPktPayload()->AttachFrame(ackFrame);
             connection->first_ack_time = config::ZERO_TIMEPOINT;
             connection->packetRecvTime.clear();
-        } else if (connection->first_ack_time + config::MAX_ACK_DELAY > utils::clock::now()) {
+        } else if ((connection->first_ack_time + config::MAX_ACK_DELAY > utils::clock::now()) && connection->first_ack_time != config::ZERO_TIMEPOINT) {
+            utils::logger::info("PENDING ACK HAS BEEN DELAYED FOR {} ms", delay);
             std::shared_ptr<payload::ShortHeader> header = std::make_shared<payload::ShortHeader>(this->SrcID2DstID[this->Sequence2ID[connection->sequence]],
                     this->pktnum++, connection->getLargestAcked());
             std::shared_ptr<payload::Payload> payload = std::make_shared<payload::Payload>();
@@ -346,7 +345,6 @@ std::shared_ptr<utils::UDPDatagram> QUIC::encodeDatagram(
     return std::make_shared<utils::UDPDatagram>(stream, pkt->GetAddrSrc(),
                                                 pkt->GetAddrDst(), 0);
 }
-
 
 
 void QUIC::handleACKFrame(std::shared_ptr<payload::ACKFrame> ackFrame, uint64_t sequence) {
