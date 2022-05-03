@@ -161,24 +161,8 @@ void QUIC::detectLossAndRetransmisson(std::shared_ptr<Connection> connection, ut
     }
 }
 
-std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<thquic::context::Connection> connection)
-{
-    utils::timepoint now = utils::clock::now();
-
-    // check if initial packet needed
-    this->checkInitialPacket(connection, now);
-
-    // check if there's loss and retransmission
-    this->detectLossAndRetransmisson(connection, now);
-
-    // check if ping frame needed
-    // this->checkPingPacket(connection, now);
-
-    this->checkBufferPacket(connection);
-
+void QUIC::checkACKFrame(std::shared_ptr<Connection> connection) {
     std::list<std::shared_ptr<payload::Packet>>& pendingPackets = connection->GetPendingPackets();
-
-    // check if there're ACK frames need to be sent
     if(!connection->getACKRanges().Empty()) {
         uint64_t pktNumber = connection->getACKRanges().GetEnd();
         uint64_t delay = std::chrono::duration_cast<std::chrono::milliseconds>(utils::clock::now() - connection->packetRecvTime.find(pktNumber)->second).count();
@@ -187,13 +171,9 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
             auto frames = packet->GetPktPayload()->GetFrames();
             // remove old ACK Frames
             for(auto frame = frames.begin(); frame != frames.end() ; frame ++) {
-                switch ((*frame)->Type()) {
-                    case payload::FrameType::ACK:{
-                        packet->DeletePayloadFrame(std::distance(frames.begin(), frame));
-                        break;
-                    }
-                    default:
-                        break;
+                if ((*frame)->Type() == payload::FrameType::ACK) {
+                    packet->DeletePayloadFrame(std::distance(frames.begin(), frame));
+                    break;
                 }
             }
             std::shared_ptr<payload::ACKFrame> ackFrame = std::make_shared<payload::ACKFrame>(delay, connection->getACKRanges());
@@ -214,7 +194,27 @@ std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<th
             }
         }
     }
-    return pendingPackets;
+    // TODO: check frame length
+}
+
+std::list<std::shared_ptr<payload::Packet>>& QUIC::getPackets(std::shared_ptr<thquic::context::Connection> connection)
+{
+    utils::timepoint now = utils::clock::now();
+
+    // check if initial packet needed
+    this->checkInitialPacket(connection, now);
+
+    // check if there's loss and retransmission
+    this->detectLossAndRetransmisson(connection, now);
+
+    // check if ping frame needed
+    // this->checkPingPacket(connection, now);
+
+    this->checkBufferPacket(connection);
+
+    // check if there're ACK frames need to be sent
+    this->checkACKFrame(connection);
+    return connection->GetPendingPackets();
 }
 
 int QUIC::SocketLoop() {
@@ -348,15 +348,18 @@ std::shared_ptr<utils::UDPDatagram> QUIC::encodeDatagram(
                                                 pkt->GetAddrDst(), 0);
 }
 
-
-
-void QUIC::handleACKFrame(std::shared_ptr<payload::ACKFrame> ackFrame, uint64_t sequence) {
-    std::shared_ptr<thquic::context::Connection> connection = this->connections[sequence];
-    std::list<utils::Interval> ackedIntervals = ackFrame->GetACKRanges().Intervals();
+/**
+ * @brief 更新RTT的估计值
+ * @param connection 
+ * @param ackFrame 
+ * @return true     更新成功
+ * @return false    更新失败
+ */
+bool QUIC::updateRTT(std::shared_ptr<thquic::context::Connection> connection, std::shared_ptr<payload::ACKFrame> ackFrame) {
     uint64_t largestAcked = ackFrame->GetLargestACKed();
     // check if this ACK frame is valid
     std::shared_ptr<payload::Packet> latestPacket = connection->getUnAckedPacket(largestAcked);
-    if (latestPacket == nullptr) return;
+    if (latestPacket == nullptr) return false;
     bool isNewlyAcked = (largestAcked > (connection->getLargestAcked()) || (connection->getLargestAcked() == std::numeric_limits<uint64_t>::max()));
     // check if this ACK frame can be used for RTT estimation
     if (isNewlyAcked && latestPacket->IsACKEliciting()){
@@ -381,7 +384,19 @@ void QUIC::handleACKFrame(std::shared_ptr<payload::ACKFrame> ackFrame, uint64_t 
             connection->smoothed_rtt = 7 * connection->smoothed_rtt / 8 + adjusted_rtt / 8;
         }
     }
+    // uint64_t newLargetstAcked = ackFrame->GetLargestACKed();
+    if (isNewlyAcked > connection->getLargestAcked()) {
+        connection->setLargestAcked(largestAcked);
+    }
     utils::logger::info("ESTIMATE RTT: {}", utils::formatTimeDuration(connection->smoothed_rtt));
+    return true;
+}
+
+void QUIC::handleACKFrame(std::shared_ptr<payload::ACKFrame> ackFrame, uint64_t sequence) {
+    std::shared_ptr<thquic::context::Connection> connection = this->connections[sequence];
+    // check if ACK frame is valid & estimate rtt
+    if (!this->updateRTT(connection, ackFrame)) return;
+    std::list<utils::Interval> ackedIntervals = ackFrame->GetACKRanges().Intervals();
     for (utils::Interval interval : ackedIntervals) {
         utils::logger::info("ACKED PACKETS: START = {}, END = {}", interval.Start(), interval.End());
         for (uint64_t packetNumber = interval.Start(); packetNumber <= interval.End(); packetNumber++) {
@@ -411,10 +426,6 @@ void QUIC::handleACKFrame(std::shared_ptr<payload::ACKFrame> ackFrame, uint64_t 
             // remove acked packets
             connection->removeFromUnAckedPackets(packetNumber);
         }
-    }
-    // uint64_t newLargetstAcked = ackFrame->GetLargestACKed();
-    if (isNewlyAcked > connection->getLargestAcked()) {
-        connection->setLargestAcked(largestAcked);
     }
 }
 
